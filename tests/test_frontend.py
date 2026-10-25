@@ -19,6 +19,16 @@ def test_search_reader_and_scoped_chat(settings, indexed, monkeypatch):
     )
     app = AppTest.from_file(str(Path(__file__).parents[1] / "app.py")).run()
     assert not app.exception
+    assert "#### What would you like to read about?" in [
+        element.value for element in app.markdown
+    ]
+    assert app.text_input[0].label == "What would you like to read about?"
+    assert app.text_input[0].proto.label_visibility.value == 2
+    assert not any(
+        "Hybrid full-text search, complete articles, and source-grounded conversation."
+        in element.value
+        for element in app.caption
+    )
     app.text_input[0].set_value("coastal flood")
     next(button for button in app.button if button.label == "Find articles").click().run()
     assert not app.exception

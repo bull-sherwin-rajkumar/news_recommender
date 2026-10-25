@@ -82,8 +82,10 @@ def metadata_filters(store: Store) -> Filters:
 
 def search_view(retriever: Retriever, filters: Filters) -> None:
     with st.form("search-form"):
+        st.markdown("#### What would you like to read about?")
         question = st.text_input(
             "What would you like to read about?",
+            label_visibility="collapsed",
             placeholder="For example: the impact of climate change on coastal cities",
             max_chars=1500,
         )
@@ -189,7 +191,6 @@ def chat_view(chat: Chat, filters: Filters) -> None:
 
 def main() -> None:
     st.title("News Explorer")
-    st.caption("Hybrid full-text search, complete articles, and source-grounded conversation.")
     try:
         settings = Settings.from_env()
         store = Store(settings.database)
