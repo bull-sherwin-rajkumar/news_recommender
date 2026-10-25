@@ -66,8 +66,9 @@ Changing the Ollama model does not require reindexing.
 - Search uses your original input without an LLM rewrite. Full-query phrase
   matches come first, followed by matches containing all meaningful search terms.
   Partial keyword and semantic matches supplement those results, not displace them.
-- Read up to **five distinct ranked articles**. Fewer are shown when filters or
-  source requirements leave insufficient candidates. Scores are not probabilities
+- Browse **all matching articles**, ten per page, using the compact row of page
+  numbers, Previous, and Next controls below the results. The total is not capped at five;
+  new searches and filter changes reset pagination. Scores are not probabilities
   or a guarantee of relevance; semantic search can return loosely related articles.
 - Click **Read full article** to fetch the original complete stored body.
 - Use **Chat** for cited dataset-grounded answers and conversational follow-ups.
@@ -105,13 +106,19 @@ query interpretation and answer generation in Chat require Ollama.
    retains the original full article.
    Search protects phrase and all-term matches before candidate truncation, so
    vector candidates cannot crowd them out of the reranker shortlist. These
-   priorities apply within the existing bounded retrieval budgets.
+   Search retrieves all lexical matches without branch or result caps. Semantic
+   supplementation still uses a bounded nearest-neighbor query; it is not an
+   exhaustive set of semantic matches. Chat retains bounded retrieval budgets.
 7. `cross-encoder/ms-marco-MiniLM-L6-v2` reranks bounded evidence passages. Its raw
    scores order candidates without a hard score cutoff, in both Search and Chat.
    A small redundancy penalty encourages variety.
    In Search, scores and diversity only reorder articles within the same lexical
    tier: phrase, all terms, or supplemental. Chat keeps standard hybrid fusion
    and reranking without this lexical-first policy.
+   Search reranks the leading shortlist, then retains every remaining candidate
+   in fusion order within its lexical tier rather than discarding it. These
+   remaining candidates have fusion scores, not cross-encoder scores. This keeps
+   model inference bounded without imposing a result cap.
    Explicit years and quoted phrases must occur in the source; publication-date filtering
    remains a separate control. This avoids substituting an older election for a requested year.
 8. In Chat only, Ollama `gemma4:12b` interprets queries and conversational follow-ups,
@@ -147,6 +154,17 @@ retrieval. Existing indexes remain compatible and do not need rebuilding.
 Labels in [tests/relevance_labels.json](tests/relevance_labels.json) retain their
 historical `calibration` and `evaluation` split names for compatibility; they no
 longer imply threshold tuning. Use a separate full-corpus data directory as documented.
+
+## FTS5 exploration notebook
+
+[experimentation.ipynb](experimentation.ipynb) exposes raw SQLite FTS5 `MATCH`
+syntax against the full local corpus. Install interactive notebook support in
+the selected kernel environment with `pip install -e '.[notebook]'`, then run the
+setup/helper cells. `matches = match_search('"labor shortage"')` returns **every**
+matching chunk in BM25 order, with clickable page numbers below the output.
+Use `page_size=20` to change the page size without limiting the total. Notebook
+results are chunks, so an article can appear more than once; the app instead
+deduplicates by article. Rerun the helper and example cells after updating.
 
 ## Validation
 

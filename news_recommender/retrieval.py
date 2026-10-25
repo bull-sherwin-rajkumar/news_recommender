@@ -67,10 +67,10 @@ class Hit:
         return self.passages[0].text
 
 
-def parent_ranks(chunks: list[Chunk], limit: int) -> list[tuple[str, list[Chunk]]]:
+def parent_ranks(chunks: list[Chunk], limit: int | None) -> list[tuple[str, list[Chunk]]]:
     grouped: dict[str, list[Chunk]] = {}
     for chunk in chunks:
-        if chunk.article_id not in grouped and len(grouped) >= limit:
+        if limit is not None and chunk.article_id not in grouped and len(grouped) >= limit:
             continue
         group = grouped.setdefault(chunk.article_id, [])
         if len(group) < 2 and chunk.id not in {item.id for item in group}:
@@ -105,21 +105,23 @@ class Retriever:
         queries: list[str],
         filters: Filters | None = None,
         *,
-        limit: int = 5,
+        limit: int | None = 5,
         method: str = "hybrid",
         prefer_lexical: bool = False,
     ) -> list[Hit]:
         self.store.ensure_ready()
         if not queries or not any(query.strip() for query in queries):
             raise ValueError("Enter a topic or question.")
-        if not 1 <= limit <= 5 or method not in ("hybrid", "bm25"):
-            raise ValueError("Use a result limit from 1 to 5 and method hybrid or bm25.")
+        if (limit is not None and not 1 <= limit <= 5) or method not in ("hybrid", "bm25"):
+            raise ValueError("Use a result limit from 1 to 5 or None and method hybrid or bm25.")
         queries = list(dict.fromkeys(query.strip() for query in queries if query.strip()))[:2]
         filters = filters or Filters()
         fused: dict[str, float] = defaultdict(float)
         evidence: dict[str, dict[str, Chunk]] = defaultdict(dict)
         primary: dict[str, dict[int, str]] = defaultdict(dict)
         lexical_tiers: dict[str, int] = {}
+        parent_limit = self.settings.branch_limit if limit is not None else None
+        lexical_limit = self.settings.branch_limit * 10 if limit is not None else None
         embeddings = self.nlp.embed_queries(queries) if method == "hybrid" else []
         for index, query in enumerate(queries):
             if prefer_lexical and index == 0:
@@ -131,17 +133,13 @@ class Retriever:
                     if not expression or expression in expressions:
                         continue
                     expressions.add(expression)
-                    chunks = self.store.lexical(
-                        expression, filters, self.settings.branch_limit * 10
-                    )
+                    chunks = self.store.lexical(expression, filters, lexical_limit)
                     chunks = [chunk for chunk in chunks if not is_gallery_boilerplate(chunk.text)]
-                    for article_id, passages in parent_ranks(chunks, self.settings.branch_limit):
+                    for article_id, passages in parent_ranks(chunks, parent_limit):
                         lexical_tiers.setdefault(article_id, tier)
                         lexical.extend(passages)
             else:
-                lexical = self.store.lexical(
-                    lexical_expression(query), filters, self.settings.branch_limit * 10
-                )
+                lexical = self.store.lexical(lexical_expression(query), filters, lexical_limit)
             branches = [lexical]
             if method == "hybrid":
                 ids = self.vectors.search(
@@ -152,24 +150,29 @@ class Retriever:
             for branch_index, branch in enumerate(branches):
                 branch = [chunk for chunk in branch if not is_gallery_boilerplate(chunk.text)]
                 for rank, (article_id, chunks) in enumerate(
-                    parent_ranks(branch, self.settings.branch_limit), 1
+                    parent_ranks(branch, parent_limit), 1
                 ):
                     fused[article_id] += (1.0 if index == 0 else 0.5) / (60 + rank)
                     primary[article_id].setdefault(branch_index, chunks[0].id)
                     for chunk in chunks:
                         evidence[article_id].setdefault(chunk.id, chunk)
+        articles = {aid: self.store.article(aid) for aid in fused}
         candidates = [
             aid
             for aid in sorted(fused, key=lambda aid: (lexical_tiers.get(aid, 2), -fused[aid], aid))
-            if matches_requirements(self.store.article(aid), queries[0])
-        ][: self.settings.rerank_limit]
+            if matches_requirements(articles[aid], queries[0])
+        ]
+        if limit is not None:
+            candidates = candidates[: self.settings.rerank_limit]
         if not candidates:
             return []
         if method == "bm25":
             return [
-                Hit(self.store.article(aid), list(evidence[aid].values())[:2], fused[aid])
+                Hit(articles[aid], list(evidence[aid].values())[:2], fused[aid])
                 for aid in candidates[:limit]
             ]
+        overflow = candidates[self.settings.rerank_limit :]
+        candidates = candidates[: self.settings.rerank_limit]
         passages = []
         for article_id in candidates:
             chunk_ids = dict.fromkeys([*primary[article_id].values(), *evidence[article_id]])
@@ -178,7 +181,7 @@ class Retriever:
             (
                 queries[0],
                 self.nlp.document(
-                    self.store.article(chunk.article_id).headline,
+                    articles[chunk.article_id].headline,
                     chunk.text,
                     self.nlp.ranker.tokenizer,
                 ),
@@ -195,11 +198,11 @@ class Retriever:
         for article_id, items in scored.items():
             items.sort(key=lambda pair: (-pair[0], pair[1].id))
             hits.append(
-                Hit(self.store.article(article_id), [item[1] for item in items], items[0][0])
+                Hit(articles[article_id], [item[1] for item in items], items[0][0])
             )
         hits.sort(key=lambda hit: (-hit.score, hit.article.id))
         selected: list[Hit] = []
-        while hits and len(selected) < limit:
+        while hits and (limit is None or len(selected) < limit):
             # Keep lexical tiers ahead of supplements, even after diversity adjustment.
             best = max(
                 hits,
@@ -211,6 +214,10 @@ class Retriever:
             )
             selected.append(best)
             hits.remove(best)
+        selected.extend(
+            Hit(articles[aid], list(evidence[aid].values())[:2], fused[aid]) for aid in overflow
+        )
+        selected.sort(key=lambda hit: lexical_tiers.get(hit.article.id, 2))
         return selected
 
     @staticmethod

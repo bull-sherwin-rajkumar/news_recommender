@@ -9,8 +9,7 @@
 data/
 data-full/
 
-# Local experiments and notebook checkpoints
-experimentation.ipynb
+# Notebook checkpoints
 .ipynb_checkpoints/
 
 # Python caches and build artifacts

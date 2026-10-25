@@ -4,7 +4,11 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from news_recommender.chat import Chat, Reply
+from news_recommender.ingestion import ingest
 from news_recommender.retrieval import Retriever
+from news_recommender.storage import Store, Vectors
+
+from .conftest import source_row
 
 
 def test_search_reader_and_scoped_chat(settings, indexed, monkeypatch):
@@ -88,15 +92,13 @@ def test_search_displays_ranked_candidates(settings, indexed, monkeypatch, candi
     app.text_input[0].set_value("Fixture question")
     next(button for button in app.button if button.label == "Find articles").click().run()
     assert not app.exception
-    expected_count = min(candidate_count, 5)
+    expected_count = candidate_count
     assert (
         len([button for button in app.button if button.label == "Read full article"])
         == expected_count
     )
     notices = [item.value for item in [*app.info, *app.success]]
-    expected_notice = (
-        f"Found {expected_count} article(s)." if expected_count < 5 else "Found 5 articles."
-    )
+    expected_notice = f"Found {expected_count} articles."
     assert any(expected_notice in value for value in notices)
     assert not any("qualifying" in value or "weak matches" in value for value in notices)
     if expected_count:
@@ -110,8 +112,8 @@ def test_search_preserves_original_query_and_requests_lexical_priority(
     monkeypatch.setenv("NEWS_DATA_DIR", str(settings.data_dir))
     calls = []
 
-    def search(self, queries, filters, *, prefer_lexical=False):
-        calls.append((queries, filters, prefer_lexical))
+    def search(self, queries, filters, *, limit=5, prefer_lexical=False):
+        calls.append((queries, filters, prefer_lexical, limit))
         return []
 
     def unexpected_prepare(*args, **kwargs):
@@ -127,6 +129,7 @@ def test_search_preserves_original_query_and_requests_lexical_priority(
     assert len(calls) == 1
     assert calls[0][0] == [query]
     assert calls[0][2] is True
+    assert calls[0][3] is None
 
 
 def test_search_rejects_blank_input_without_retrieval(settings, indexed, monkeypatch):
@@ -142,3 +145,79 @@ def test_search_rejects_blank_input_without_retrieval(settings, indexed, monkeyp
     assert not app.exception
     assert app.error and "between 1 and 1500 characters" in app.error[0].value
     assert not app.session_state["searched"]
+
+
+def test_search_numbered_pages_reader_and_resets(settings, nlp, monkeypatch):
+    vectors = Vectors(settings, create=True)
+    ingest(settings, rows=[source_row(index) for index in range(23)], nlp=nlp, vectors=vectors)
+    hits = Retriever(settings, Store(settings.database), vectors, nlp).search(
+        ["flood"], limit=None, prefer_lexical=True
+    )
+    monkeypatch.setenv("NEWS_DATA_DIR", str(settings.data_dir))
+    calls = []
+
+    def search(*args, **kwargs):
+        calls.append(kwargs)
+        return hits
+
+    monkeypatch.setattr(Retriever, "search", search)
+    app = AppTest.from_file(str(Path(__file__).parents[1] / "app.py")).run()
+
+    def click(label):
+        next(button for button in app.button if button.label == label).click().run()
+        assert not app.exception
+
+    def headlines():
+        return [element.value for element in app.subheader]
+
+    app.text_input[0].set_value("flood")
+    click("Find articles")
+    assert "Found 23 articles." in app.success[0].value
+    assert headlines() == [hit.article.headline for hit in hits[:10]]
+    assert next(button for button in app.button if button.label == "Previous").disabled
+    click("2")
+    assert headlines() == [hit.article.headline for hit in hits[10:20]]
+    click("Read full article")
+    assert hits[10].article.body in [element.value for element in app.text]
+    click("Back to results")
+    assert headlines() == [hit.article.headline for hit in hits[10:20]]
+    click("Next")
+    assert headlines() == [hit.article.headline for hit in hits[20:]]
+    assert next(button for button in app.button if button.label == "Next").disabled
+    assert any("Page 3 of 3" in item.value for item in app.caption)
+    click("Previous")
+    assert headlines() == [hit.article.headline for hit in hits[10:20]]
+    assert len(calls) == 1
+    click("Find articles")
+    assert app.session_state["search_page"] == 1
+    assert headlines() == [hit.article.headline for hit in hits[:10]]
+    click("3")
+    app.selectbox[0].select("news").run()
+    assert not app.exception
+    assert not app.session_state["results"]
+    assert not app.session_state["searched"]
+    assert app.session_state["search_page"] == 1
+    assert not headlines()
+
+
+def test_numbered_pagination_can_jump_to_distant_pages():
+    app = AppTest.from_string(
+        "import streamlit as st\n"
+        "from app import search_pagination\n"
+        "search_pagination(st.session_state.get('search_page', 1), 100)\n"
+    ).run()
+    assert not app.exception
+    assert len(app.button) < 10
+    assert not app.get("column")
+    layout = str(app.get("flex_container")[-1].proto.flex_container)
+    assert "direction: HORIZONTAL" in layout
+    assert "gap_size: SMALL" in layout
+    assert "justify: JUSTIFY_START" in layout
+    assert any(element.value == "..." for element in app.markdown)
+    next(button for button in app.button if button.label == "100").click().run()
+    assert not app.exception
+    assert app.session_state["search_page"] == 100
+    assert next(button for button in app.button if button.label == "Next").disabled
+    next(button for button in app.button if button.label == "1").click().run()
+    assert not app.exception
+    assert app.session_state["search_page"] == 1

@@ -42,6 +42,47 @@ def show_error(exc: Exception) -> None:
 
 
 ERRORS = (ValueError, OSError, RuntimeError, sqlite3.Error, LookupError, ChromaError)
+SEARCH_PAGE_SIZE = 10
+
+
+def set_search_page(page: int) -> None:
+    st.session_state["search_page"] = page
+
+
+def search_pagination(page: int, page_count: int) -> None:
+    numbers = sorted({1, page_count, *range(max(1, page - 2), min(page_count, page + 2) + 1)})
+    slots: list[int | None] = []
+    previous = 0
+    for number in numbers:
+        if previous and number - previous > 1:
+            slots.append(None)
+        slots.append(number)
+        previous = number
+    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+        st.button(
+            "Previous",
+            disabled=page == 1,
+            on_click=set_search_page,
+            args=(page - 1,),
+        )
+        for number in slots:
+            if number is None:
+                st.markdown("...", width="content")
+            else:
+                st.button(
+                    str(number),
+                    key=f"search-page-{number}",
+                    type="primary" if number == page else "secondary",
+                    disabled=number == page,
+                    on_click=set_search_page,
+                    args=(number,),
+                )
+        st.button(
+            "Next",
+            disabled=page == page_count,
+            on_click=set_search_page,
+            args=(page + 1,),
+        )
 
 
 def result_card(hit: Hit, key: str, label: str | None = None) -> None:
@@ -94,13 +135,14 @@ def search_view(retriever: Retriever, filters: Filters) -> None:
         st.session_state.pop("selected_article", None)
         st.session_state["results"] = []
         st.session_state["searched"] = False
+        st.session_state["search_page"] = 1
         st.session_state["result_filters"] = filters
         try:
             with st.spinner("Searching the corpus..."):
                 question = question.strip()
                 if not question or len(question) > 1500:
                     raise ValueError("Enter a question between 1 and 1500 characters.")
-                hits = retriever.search([question], filters, prefer_lexical=True)
+                hits = retriever.search([question], filters, limit=None, prefer_lexical=True)
             st.session_state["results"] = hits
             st.session_state["searched"] = True
         except ERRORS as exc:
@@ -108,12 +150,13 @@ def search_view(retriever: Retriever, filters: Filters) -> None:
     if st.session_state.get("result_filters") != filters:
         st.session_state["results"] = []
         st.session_state["searched"] = False
+        st.session_state["search_page"] = 1
     hits = st.session_state.get("results", [])
     if st.session_state.get("searched"):
-        if len(hits) < 5:
-            st.info(f"Found {len(hits)} article(s). Try another topic or broaden the filters.")
+        if not hits:
+            st.info("Found 0 articles. Try another topic or broaden the filters.")
         else:
-            st.success("Found 5 articles. Select one to read its complete text.")
+            st.success(f"Found {len(hits):,} articles. Select one to read its complete text.")
         if hits:
             st.caption(
                 "Phrase matches first, then all search terms; semantic and partial matches "
@@ -135,8 +178,17 @@ def search_view(retriever: Retriever, filters: Filters) -> None:
         )
         st.text(article.body)
     else:
-        for index, hit in enumerate(hits):
+        page_count = max(1, (len(hits) + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
+        page = min(max(1, st.session_state.get("search_page", 1)), page_count)
+        start = (page - 1) * SEARCH_PAGE_SIZE
+        for index, hit in enumerate(hits[start : start + SEARCH_PAGE_SIZE], start=start):
             result_card(hit, f"search-{index}-{hit.article.id}")
+        if hits:
+            st.caption(
+                f"Showing {start + 1}–{min(start + SEARCH_PAGE_SIZE, len(hits))} "
+                f"of {len(hits):,} articles · Page {page} of {page_count}"
+            )
+            search_pagination(page, page_count)
 
 
 def chat_view(chat: Chat, filters: Filters) -> None:

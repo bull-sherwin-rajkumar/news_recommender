@@ -128,6 +128,57 @@ def test_five_unique_articles_and_result_limit(settings, indexed):
     assert len(retriever.search(["flood"], limit=2)) == 2
 
 
+@pytest.mark.parametrize("method", ["hybrid", "bm25"])
+def test_unlimited_search_keeps_matches_beyond_all_budgets(settings, nlp, monkeypatch, method):
+    settings = replace(settings, branch_limit=1, rerank_limit=2)
+    vectors = Vectors(settings, create=True)
+    ingest(settings, rows=[source_row(index) for index in range(17)], nlp=nlp, vectors=vectors)
+    retriever = Retriever(settings, Store(settings.database), vectors, nlp)
+    reranked = []
+    original_rerank = nlp.rerank
+
+    def rerank(pairs):
+        reranked.extend(pairs)
+        return original_rerank(pairs)
+
+    monkeypatch.setattr(nlp, "rerank", rerank)
+    hits = retriever.search(["coastal flood"], limit=None, method=method, prefer_lexical=True)
+    assert len(hits) == len({hit.article.id for hit in hits}) == 17
+    assert {hit.article.source_index for hit in hits} == {str(index) for index in range(17)}
+    assert len(reranked) <= settings.rerank_limit * 2
+    assert len(retriever.search(["coastal flood"], method=method)) <= 5
+    assert retriever.search(
+        ["coastal flood"], Filters(date_from=20220101), limit=None, method=method
+    ) == []
+
+
+def test_unlimited_search_keeps_all_discovered_vector_parents(settings, indexed, monkeypatch):
+    store, vectors, nlp = indexed
+    with store.connect() as db:
+        ids = [row[0] for row in db.execute("SELECT id FROM chunks ORDER BY id")]
+    monkeypatch.setattr(store, "lexical", lambda *args: [])
+    monkeypatch.setattr(vectors, "search", lambda *args: ids)
+    retriever = Retriever(replace(settings, branch_limit=1, rerank_limit=2), store, vectors, nlp)
+    assert len(retriever.search(["fixture question"], limit=None)) == 7
+    assert len(retriever.search(["fixture question"])) == 1
+
+
+def test_unlimited_search_preserves_tiers_filters_and_requirements(lexical_corpus):
+    retriever, query = lexical_corpus
+    retriever.settings = replace(retriever.settings, branch_limit=1, rerank_limit=1)
+    hits = retriever.search([query], limit=None, prefer_lexical=True)
+    assert len(hits) == len({hit.article.id for hit in hits}) == 4
+    assert [hit.article.source_index for hit in hits[:2]] == ["0", "1"]
+    assert retriever.search([f"{query} 2099"], limit=None, prefer_lexical=True) == []
+    quoted = retriever.search([f'"{query}"'], limit=None, prefer_lexical=True)
+    assert [hit.article.source_index for hit in quoted] == ["0"]
+    filtered = retriever.search(
+        [query], Filters(section="secondary"), limit=None, prefer_lexical=True
+    )
+    assert filtered[0].article.source_index == "1"
+    assert all(hit.article.section == "secondary" for hit in filtered)
+
+
 @pytest.mark.parametrize("score", [-100.0, -1.0, 0.0, 1.0, 10.0])
 def test_finite_scores_do_not_gate_vector_candidates(settings, indexed, monkeypatch, score):
     store, vectors, nlp = indexed

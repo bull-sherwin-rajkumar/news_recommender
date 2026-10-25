@@ -242,7 +242,7 @@ class Store:
             ).fetchall()
         return {row["id"]: Chunk(**dict(row)) for row in rows}
 
-    def lexical(self, expression: str, filters: Filters, limit: int) -> list[Chunk]:
+    def lexical(self, expression: str, filters: Filters, limit: int | None) -> list[Chunk]:
         if not expression:
             return []
         where, values = filters.sql()
@@ -251,8 +251,9 @@ class Store:
                 "SELECT c.* FROM chunk_fts JOIN chunks c ON c.id=chunk_fts.id "
                 "JOIN articles a ON a.id=c.article_id "
                 f"WHERE chunk_fts MATCH ? AND {where} "
-                "ORDER BY bm25(chunk_fts, 0, 0, 5, 3, 1), c.id LIMIT ?",
-                [expression, *values, limit],
+                "ORDER BY bm25(chunk_fts, 0, 0, 5, 3, 1), c.id"
+                + (" LIMIT ?" if limit is not None else ""),
+                [expression, *values, *([limit] if limit is not None else [])],
             ).fetchall()
         return [Chunk(**dict(row)) for row in rows]
 
