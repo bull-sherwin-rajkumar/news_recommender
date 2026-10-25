@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-news-recommender"
+version = "0.1.0"
+description = "Local hybrid news search, complete-article reader, and grounded chat"
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb>=1.0,<2",
+    "datasets>=3,<5",
+    "ollama>=0.6,<1",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1,<2",
+    "sentence-transformers>=5,<6",
+    "streamlit>=1.42,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[project.scripts]
+news-ingest = "news_recommender.ingestion:main"
+news-evaluate = "news_recommender.evaluation:main"
+
+[tool.setuptools.packages.find]
+include = ["news_recommender*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

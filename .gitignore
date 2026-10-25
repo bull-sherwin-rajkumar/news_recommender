@@ -1,0 +1,23 @@
+# Local environment and secrets
+.venv/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Generated datasets and indexes
+data/
+data-full/
+
+# Local experiments and notebook checkpoints
+experimentation.ipynb
+.ipynb_checkpoints/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/

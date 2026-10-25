@@ -1,0 +1,198 @@
+[
+  {
+    "query": "Beijing Winter Olympics",
+    "split": "calibration",
+    "relevant": {
+      "72052580e83c3fcd0e166eede90a35fc": 2,
+      "8fdea601e513b44aa8d6cb7ab52fd1a6": 2,
+      "81e7a367758d7f2c96ad35bd29d1bcdd": 2,
+      "f1851ab212e1852bf6c1fbea1b631827": 2,
+      "83633eae87886a46e055f3b48ff3ed24": 2
+    }
+  },
+  {
+    "query": "Afghan women Taliban",
+    "split": "calibration",
+    "relevant": {
+      "661bbfc3c4ebd5dcdf5be5acb219fe16": 2,
+      "4aa9ebee90b8dc2f352c5fd0d4a6adbe": 2,
+      "7321a1cd216d7eb16aacd72c535a3fbd": 2,
+      "02326d5103a257f165b701d8cf019bd2": 2,
+      "335b2d5c6d05346aa745f82fca2b66d6": 0
+    }
+  },
+  {
+    "query": "International Women's Day",
+    "split": "calibration",
+    "relevant": {
+      "335b2d5c6d05346aa745f82fca2b66d6": 2,
+      "4aa9ebee90b8dc2f352c5fd0d4a6adbe": 2,
+      "d01a4974879eb711438145b745aecbb5": 2,
+      "3d2c0fc4a938880e7295cf338c02f87e": 1,
+      "50b3566fc1fa91341006d23af0c8112e": 0
+    }
+  },
+  {
+    "query": "2026 US presidential election results",
+    "split": "calibration",
+    "unsupported": true
+  },
+  {
+    "query": "New Zealand election results in 2030",
+    "split": "calibration",
+    "unsupported": true
+  },
+  {
+    "query": "unicorn nuclear banana insurance",
+    "split": "calibration",
+    "unsupported": true
+  },
+  {
+    "query": "United Kingdom Brexit trade negotiations",
+    "relevant": {
+      "71c511f9f54165452e5e3deb6ff4f105": 2,
+      "e75f01aa9acca8d892238fb47becc875": 2,
+      "2e1e4b509623b0ce7075b8a9651f69d7": 2,
+      "fbbb0f55b033022d52250ba39cbbda5f": 2,
+      "862255fb6dabd7be9aa7f544a2be9b5a": 2,
+      "6ef6afe99ee800b696c1c68b13afca84": 1,
+      "68ff0826f67d5c8bb157a052446b528c": 2,
+      "472c34039dc006f730a5f0fd332c33df": 2,
+      "b66ee08777c0d8271ed22d3740f43021": 2,
+      "9b2e35065622fc4d4c56e4bee0989ecc": 1
+    }
+  },
+  {
+    "query": "wildfires and climate change in Australia",
+    "relevant": {
+      "0990390820e32e2d6fe59e4d47871ab0": 2,
+      "72648239a2ab7ee15dbdacdaa509db95": 1,
+      "52a18d22b7933df28a2118f44fbad9e0": 1,
+      "3251d9ac303f3565e9ffe9e8264df634": 2,
+      "749bf83795a76568eadcb706e85c0f68": 2,
+      "e4b4749b727ecd310fd7ceecec2ee70a": 2,
+      "1328b3c54d1fdd502995144bccf41e1f": 1,
+      "796a3f64813ec8e276eb8227a60dfb38": 1
+    }
+  },
+  {
+    "query": "COVID-19 vaccine safety",
+    "relevant": {
+      "0afffd1832ae4c98f3ffa8f93dff5d83": 2,
+      "16246c7ab30094fd9698146aadaa2e2c": 2,
+      "5d3f9e728e6f50fe4ae2c4dc549587e0": 2,
+      "c7ac2181691599bab8ba7ef2434cbb63": 2,
+      "12f89f53e1ce39c20e6e45bda7796649": 2,
+      "833693a66922acd8d15caeb901ae2415": 2,
+      "b48e8cfe308c4e3bdf9157ecf7bb6f60": 0,
+      "de255c8095c1b4cf90893969aef1e0d6": 0
+    }
+  },
+  {
+    "query": "NASA Mars rover Perseverance",
+    "relevant": {
+      "8abc50f3f7b6846ec985d04c064c89a2": 2,
+      "d96ff24fbf62d0fc58a1ce99ee6c7461": 1,
+      "bfad8b08ced408abca6f6212797a095d": 2,
+      "8ca7bf673f13aa706beaa7a81de30121": 2,
+      "0cfb2540d9e6b3c40d9e8a959c61f298": 2,
+      "d4f03f9716dd8ffc70bcfe1b2b64f9fa": 2
+    }
+  },
+  {
+    "query": "Russia invasion Ukraine refugees",
+    "relevant": {
+      "0448c99a059a7735369cd4cea5bcf67d": 2,
+      "56b1e794fe21799cb0ada28cc2a41736": 2,
+      "aea5023cfdd8bfdfcac04da61b57f60c": 2,
+      "1039fc636f8f7b25e05435fbb950a731": 1,
+      "5ea3f0a4a9da4e19807d9c9f2824c5c4": 2,
+      "417d4f6a05da89dac422f778e44fbc98": 1,
+      "6c3ec72d9fc4b8f812bb0a87eb7fb839": 1
+    }
+  },
+  {
+    "query": "North Korea ballistic missile tests",
+    "relevant": {
+      "4487a79001fc6eff4f5f20930e909644": 2,
+      "7f2cf3ed8e01a3a8ecff1bfda9cc0e00": 2,
+      "1f5d58f9d6dc8a77e62192ef2a545465": 2,
+      "594152097464b1226cb0e671e9f01893": 2,
+      "945c7044ca7e9012acf177036710ffea": 2,
+      "c0db8d2b4c9604dcac65a08cfa73a8f7": 2,
+      "d1782eeb1be1ba04d15b43189f29e03f": 2,
+      "d76748cc8b02f9afae6b17198ba3d19d": 2
+    }
+  },
+  {
+    "query": "How are rising sea levels threatening coastal communities?",
+    "relevant": {
+      "4670bfaad1936583f15f76ba913f2571": 2,
+      "ff2557edb09de89bc4feffefc81af8ec": 2,
+      "51181a1b54967d057663f0b0d2ba0cf1": 2,
+      "350f7041a81334d80dad539c4b910279": 2,
+      "18f0c2161d716484b831177cae6abd9d": 2,
+      "fde4f5900f82be75d0797726e6d042c5": 0,
+      "750d7055433e6ad72da190371bd22a43": 2,
+      "f610de5ca3e6af3f2c0f14b4b09d0bac": 2
+    }
+  },
+  {
+    "query": "SpaceX reusable rockets landing",
+    "relevant": {
+      "60426a3b2364428f1c9212bc0d80cac7": 1,
+      "64e8a51cb77550922e3115e8b07ee099": 2,
+      "e4ba4e9233570288641952d0670ff0f8": 2,
+      "b868318c4f878ac21494d218094837c3": 0,
+      "44b26a50cf50e173111e19dcb62b8606": 0
+    }
+  },
+  {
+    "query": "inflation and interest rates Federal Reserve",
+    "relevant": {
+      "d2fdd4583f5f6373be054d404cdadb3d": 2,
+      "9cca2bda4a190ed79f219283a5983fef": 2,
+      "63a2e4267e6d7d310984e38873e4c480": 2,
+      "41519fc113003a741373f4a973af9d04": 2,
+      "478de032aa739fc2cecd5498597a4944": 1,
+      "7ba1803e2c4aaf7b46ef9f8f884765df": 1,
+      "4b14a434f56ef16833327810c556df6e": 1,
+      "2e371936a5b071d4f050b12c70f525ef": 1
+    }
+  },
+  {
+    "query": "football Lionel Messi Paris Saint Germain",
+    "relevant": {
+      "92ec5698092ad66271bbef7034d0a30c": 2,
+      "555d5934fee7ee76e19787dcf926dc49": 2,
+      "b6863074c92881e397138d550c02202e": 1,
+      "e83bd5cf7fd30a1274493b4746f4be92": 2,
+      "eb9b569053ad74a0816787637456c8e5": 2,
+      "9971895c7213623556dfc591c4f96108": 2,
+      "8836ddee2f53011a9bf9d121723cfc4e": 2
+    }
+  },
+  {
+    "query": "2099 Martian presidential election results",
+    "unsupported": true
+  },
+  {
+    "query": "telepathic pineapple levitation tutorials",
+    "unsupported": true,
+    "relevant": {
+      "62eca0f4fe533b9cc76a1d238cdd11fb": 0,
+      "03fe27d8d1f99648e43cbb45d31f195f": 0,
+      "840dabfde8865ff2569e80642bd9c2df": 0,
+      "83177df29210ae05a54bbbb73b4159bd": 0,
+      "65e709bca82e8f194c1ca62fa36e20a3": 0
+    }
+  },
+  {
+    "query": "\"flerbquux nonexisting phrase\"",
+    "unsupported": true
+  },
+  {
+    "query": "2098 Neptune parliament election results",
+    "unsupported": true
+  }
+]
