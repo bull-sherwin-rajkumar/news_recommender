@@ -17,7 +17,7 @@ class Settings:
     ollama_model: str = "gemma4:12b"
     ollama_host: str = "http://localhost:11434"
     device: str = "auto"
-    context_tokens: int = 16384
+    context_tokens: int = 64000
     ollama_timeout: float = 120
     chunk_tokens: int = 320
     overlap_tokens: int = 64
