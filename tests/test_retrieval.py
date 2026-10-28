@@ -4,7 +4,12 @@ import pytest
 
 from news_recommender.ingestion import ingest
 from news_recommender.nlp import is_gallery_boilerplate
-from news_recommender.retrieval import Retriever, lexical_expression, parent_ranks
+from news_recommender.retrieval import (
+    Retriever,
+    lexical_expression,
+    matches_requirements,
+    parent_ranks,
+)
 from news_recommender.storage import Filters, IndexNotReady, Store, Vectors
 
 from .conftest import source_row
@@ -129,8 +134,10 @@ def test_five_unique_articles_and_result_limit(settings, indexed):
 
 
 @pytest.mark.parametrize("method", ["hybrid", "bm25"])
-def test_unlimited_search_keeps_matches_beyond_all_budgets(settings, nlp, monkeypatch, method):
-    settings = replace(settings, branch_limit=1, rerank_limit=2)
+def test_browsing_caps_results_but_retains_overflow_without_reranking(
+    settings, nlp, monkeypatch, method
+):
+    settings = replace(settings, branch_limit=1, rerank_limit=2, search_limit=10)
     vectors = Vectors(settings, create=True)
     ingest(settings, rows=[source_row(index) for index in range(17)], nlp=nlp, vectors=vectors)
     retriever = Retriever(settings, Store(settings.database), vectors, nlp)
@@ -143,16 +150,18 @@ def test_unlimited_search_keeps_matches_beyond_all_budgets(settings, nlp, monkey
 
     monkeypatch.setattr(nlp, "rerank", rerank)
     hits = retriever.search(["coastal flood"], limit=None, method=method, prefer_lexical=True)
-    assert len(hits) == len({hit.article.id for hit in hits}) == 17
-    assert {hit.article.source_index for hit in hits} == {str(index) for index in range(17)}
-    assert len(reranked) <= settings.rerank_limit * 2
+    assert len(hits) == len({hit.article.id for hit in hits}) == 10
+    assert len(reranked) == (settings.rerank_limit if method == "hybrid" else 0)
+    assert len(retriever.search(["coastal flood"], limit=10, method=method)) == 10
+    with pytest.raises(ValueError, match="result limit"):
+        retriever.search(["coastal flood"], limit=11)
     assert len(retriever.search(["coastal flood"], method=method)) <= 5
     assert retriever.search(
         ["coastal flood"], Filters(date_from=20220101), limit=None, method=method
     ) == []
 
 
-def test_unlimited_search_keeps_all_discovered_vector_parents(settings, indexed, monkeypatch):
+def test_browsing_keeps_discovered_vector_parents_within_cap(settings, indexed, monkeypatch):
     store, vectors, nlp = indexed
     with store.connect() as db:
         ids = [row[0] for row in db.execute("SELECT id FROM chunks ORDER BY id")]
@@ -163,7 +172,7 @@ def test_unlimited_search_keeps_all_discovered_vector_parents(settings, indexed,
     assert len(retriever.search(["fixture question"])) == 1
 
 
-def test_unlimited_search_preserves_tiers_filters_and_requirements(lexical_corpus):
+def test_browsing_preserves_tiers_filters_and_requirements(lexical_corpus):
     retriever, query = lexical_corpus
     retriever.settings = replace(retriever.settings, branch_limit=1, rerank_limit=1)
     hits = retriever.search([query], limit=None, prefer_lexical=True)
@@ -191,7 +200,7 @@ def test_finite_scores_do_not_gate_vector_candidates(settings, indexed, monkeypa
         assert all(hit.score == score for hit in hits)
 
 
-def test_score_order_and_best_passage_are_preserved(settings, indexed, monkeypatch):
+def test_rerank_uses_one_passage_per_article(settings, indexed, monkeypatch):
     store, vectors, nlp = indexed
     with store.connect() as db:
         ids = [row[0] for row in db.execute("SELECT id FROM chunks ORDER BY id LIMIT 3")]
@@ -207,9 +216,9 @@ def test_score_order_and_best_passage_are_preserved(settings, indexed, monkeypat
     monkeypatch.setattr(nlp, "rerank", lambda pairs: [scores[text] for _, text in pairs])
     retriever = Retriever(settings, store, vectors, nlp)
     hits = retriever.search(["fixture query"])
-    assert [hit.score for hit in hits] == [-14.0, -16.0, -18.0]
+    assert [hit.score for hit in hits] == [-14.0, -16.0, -20.0]
     assert len({hit.article.id for hit in hits}) == 3
-    assert hits[-1].passages == [extra, chunks[0]]
+    assert hits[-1].passages == [chunks[0]]
 
 
 def test_diversity_adjusts_ranking_without_discarding_low_scores(settings, indexed, monkeypatch):
@@ -324,3 +333,51 @@ def test_repeated_gallery_is_not_article_evidence(settings, nlp, monkeypatch):
     retriever = Retriever(settings, nlp=nlp)
     assert is_gallery_boilerplate(row["Article text"])
     assert retriever.search(["flood"]) == []
+
+
+def test_retrieval_batches_metadata_and_only_loads_constraint_text(settings, indexed, monkeypatch):
+    store, vectors, nlp = indexed
+    calls = []
+    original = store.article_summaries
+
+    def summaries(ids, *, include_index_text=False):
+        calls.append((ids, include_index_text))
+        return original(ids, include_index_text=include_index_text)
+
+    def unexpected_article(*args):
+        pytest.fail("Retrieval must not load full article bodies.")
+
+    monkeypatch.setattr(store, "article_summaries", summaries)
+    monkeypatch.setattr(store, "article", unexpected_article)
+    retriever = Retriever(settings, store, vectors, nlp)
+    hits = retriever.search(["flood"])
+    assert len(calls) == 1 and calls[0][1] is False
+    assert all(hit.article.index_text is None for hit in hits)
+    assert matches_requirements(hits[0].article, "flood")
+    retriever.search(['flood "coastal flooding"'])
+    assert len(calls) == 2 and calls[1][1] is True
+
+
+def test_default_search_cap_and_reranker_work_are_bounded(settings, nlp, monkeypatch):
+    ingest(settings, rows=[source_row(index) for index in range(305)], nlp=nlp)
+    retriever = Retriever(settings, nlp=nlp)
+    lexical_limits = []
+    original = retriever.store.lexical
+    rerank_counts = []
+    original_rerank = nlp.rerank
+
+    def lexical(expression, filters, limit):
+        lexical_limits.append(limit)
+        return original(expression, filters, limit)
+
+    def rerank(pairs):
+        rerank_counts.append(len(pairs))
+        return original_rerank(pairs)
+
+    monkeypatch.setattr(retriever.store, "lexical", lexical)
+    monkeypatch.setattr(nlp, "rerank", rerank)
+    hits = retriever.search(["flood"], limit=None, prefer_lexical=True)
+    assert len(hits) == len({hit.article.id for hit in hits}) == 300
+    assert lexical_limits and all(limit == 3000 for limit in lexical_limits)
+    assert rerank_counts == [20]
+    assert all(len(hit.passages) == 1 for hit in hits)

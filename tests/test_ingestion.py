@@ -2,7 +2,14 @@ from dataclasses import replace
 
 import pytest
 
-from news_recommender.ingestion import IngestionStats, ingest, parse_article, source_url
+from news_recommender.config import DATASET, REVISION, Settings
+from news_recommender.ingestion import (
+    IngestionStats,
+    dataset_rows,
+    ingest,
+    parse_article,
+    source_url,
+)
 from news_recommender.nlp import normalize, split_chunks
 from news_recommender.storage import Filters, IndexNotReady, Store, Vectors
 
@@ -116,3 +123,39 @@ def test_truncated_source_is_not_published(settings, nlp, monkeypatch):
         ingest(settings, nlp=nlp)
     with pytest.raises(IndexNotReady):
         Store(settings.database).ensure_ready()
+
+
+def test_dataset_uses_downloaded_cache_not_streaming(monkeypatch):
+    calls = []
+    rows = [source_row(0)]
+
+    def load(name, **kwargs):
+        calls.append((name, kwargs))
+        return rows
+
+    monkeypatch.setattr("datasets.load_dataset", load)
+    assert dataset_rows() is rows
+    assert calls == [(DATASET, {"revision": REVISION, "split": "train", "streaming": False})]
+
+
+def test_latency_configuration_defaults_and_overrides(monkeypatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    for name in (
+        "NEWS_CONTEXT_TOKENS", "NEWS_DEVICE", "NEWS_RERANKER_BACKEND", "NEWS_SEARCH_LIMIT"
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings.from_env()
+    assert settings.device == "cuda"
+    assert settings.reranker_backend == "onnx"
+    assert settings.context_tokens == 64000
+    assert settings.rerank_limit == 20
+    assert settings.search_limit == 300
+    monkeypatch.setenv("NEWS_DEVICE", "cpu")
+    monkeypatch.setenv("NEWS_RERANKER_BACKEND", "torch")
+    monkeypatch.setenv("NEWS_SEARCH_LIMIT", "500")
+    overridden = Settings.from_env()
+    assert overridden.device == "cpu" and overridden.reranker_backend == "torch"
+    assert overridden.search_limit == 500
+    monkeypatch.setenv("NEWS_SEARCH_LIMIT", "501")
+    with pytest.raises(ValueError, match="Search limit"):
+        Settings.from_env()

@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import httpx
@@ -42,11 +43,6 @@ class QueryPlan(BaseModel):
         return [value.strip() for value in values]
 
 
-class GroundedOutput(BaseModel):
-    supported: bool
-    answer: str = Field(min_length=1, max_length=16000)
-
-
 @dataclass(frozen=True)
 class PreparedQuery:
     question: str
@@ -68,12 +64,30 @@ class Chat:
         self.client = client or ollama.Client(
             host=settings.ollama_host, timeout=settings.ollama_timeout
         )
+        self.warmup_warning: str | None = None
 
-    def _request(self, messages: list[dict[str, str]], schema: dict, *, tokens: int) -> str:
+    def warmup(self) -> None:
+        try:
+            self.client.chat(
+                model=self.settings.ollama_model,
+                messages=[],
+                stream=False,
+                think=False,
+                keep_alive="30m",
+                options={"num_ctx": self.settings.context_tokens},
+            )
+        except (ollama.ResponseError, httpx.HTTPError, ConnectionError) as exc:
+            logger.exception("Ollama warmup failed")
+            raise ChatError(f"Ollama warmup failed: {exc}. Search remains available.") from exc
+
+    def _check_budget(self, messages: list[dict[str, str]], tokens: int, schema: dict) -> None:
         input_bytes = sum(len(message["content"].encode()) for message in messages)
         schema_bytes = len(json.dumps(schema).encode())
         if input_bytes + schema_bytes + tokens + 256 > self.settings.context_tokens:
             raise ChatError("Input exceeds the local model's context budget. Shorten the question.")
+
+    def _request(self, messages: list[dict[str, str]], schema: dict, *, tokens: int) -> str:
+        self._check_budget(messages, tokens, schema)
         try:
             response = self.client.chat(
                 model=self.settings.ollama_model,
@@ -81,6 +95,7 @@ class Chat:
                 format=schema,
                 stream=False,
                 think=False,
+                keep_alive="30m",
                 options={
                     "temperature": 0,
                     "num_ctx": self.settings.context_tokens,
@@ -98,6 +113,54 @@ class Chat:
         if not content:
             raise ChatError("Ollama returned an empty response.")
         return content
+
+    def _stream_answer(
+        self, messages: list[dict[str, str]], on_text: Callable[[str], None] | None
+    ) -> str:
+        self._check_budget(messages, 1536, {})
+        text = ""
+        completed = False
+        try:
+            stream = self.client.chat(
+                model=self.settings.ollama_model,
+                messages=messages,
+                stream=True,
+                think=False,
+                keep_alive="30m",
+                options={
+                    "temperature": 0,
+                    "num_ctx": self.settings.context_tokens,
+                    "num_predict": 1536,
+                },
+            )
+            try:
+                for part in stream:
+                    if part.done:
+                        completed = True
+                        if part.done_reason == "length":
+                            raise ChatError(
+                                "Ollama reached the answer length limit. Ask a narrower question."
+                            )
+                    if part.message.content:
+                        text += part.message.content
+                        if on_text is not None:
+                            on_text(text)
+            finally:
+                close = getattr(stream, "close", None)
+                if close is not None:
+                    close()
+        except (ollama.ResponseError, httpx.HTTPError, ConnectionError, ChatError) as exc:
+            if on_text is not None:
+                on_text("")
+            logger.exception("Ollama answer stream failed")
+            raise ChatError(f"Ollama could not complete the answer: {exc}.") from exc
+        if not text.strip():
+            raise ChatError("Ollama returned an empty answer.")
+        if not completed:
+            if on_text is not None:
+                on_text("")
+            raise ChatError("Ollama ended the stream before completing the answer.")
+        return text.strip()
 
     @staticmethod
     def _history(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -117,6 +180,8 @@ class Chat:
         question = question.strip()
         if not question or len(question) > 1500:
             raise ValueError("Enter a question between 1 and 1500 characters.")
+        if not history:
+            return PreparedQuery(question, [question])
         messages = [
             {
                 "role": "system",
@@ -167,6 +232,8 @@ class Chat:
         question: str,
         history: list[dict[str, str]] | None = None,
         filters: Filters | None = None,
+        *,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         self.retriever.store.ensure_ready()
         filters = filters or Filters()
@@ -180,16 +247,16 @@ class Chat:
                 "Address the standalone question, not a political viewpoint preference. "
                 "Every factual paragraph must cite its supporting source as [1], [2], etc. "
                 "Use ONLY the supplied source numbers. Do not invent quotes, URLs or sources. "
-                "If evidence is insufficient, return supported=false. Otherwise return "
-                "supported=true and a concise answer with citations in the answer string. "
+                f"If evidence is insufficient, return exactly: {NO_EVIDENCE} "
+                "Otherwise return a concise plain-text answer with citations. "
                 "When given excerpts, do not claim an exhaustive summary of an entire article. "
-                "Return JSON matching the provided schema."
+                "Do not return JSON or wrap the answer in a code block."
             ),
         }
         history_messages = self._history(history or [])
         question_prefix = f"Standalone question: {prepared.question}\n\nNEWS EVIDENCE:\n"
-        # UTF-8 bytes conservatively upper-bound ordinary text tokens. Reserve framing,
-        # output-schema and generation space rather than assuming four characters/token.
+        # UTF-8 bytes conservatively upper-bound ordinary text tokens. Reserve framing
+        # and generation space rather than assuming four characters/token.
         budget = self.settings.context_tokens - 1536 - 1024
         overhead = sum(len(item["content"].encode()) for item in [system, *history_messages]) + len(
             question_prefix.encode()
@@ -235,15 +302,20 @@ class Chat:
             {"role": "user", "content": question_prefix + "\n\n".join(blocks)},
         ]
         for attempt in range(2):
-            raw = self._request(messages, GroundedOutput.model_json_schema(), tokens=1536)
+            if on_text is not None:
+                on_text("")
+            text = self._stream_answer(messages, on_text)
+            if text == NO_EVIDENCE:
+                return Reply(NO_EVIDENCE, [], notice)
             try:
-                output = GroundedOutput.model_validate_json(raw)
-                if not output.supported:
-                    return Reply(NO_EVIDENCE, [], notice)
-                labels = {int(value) for value in re.findall(r"\[(\d+)\]", output.answer)}
+                if len(text) > 16000:
+                    raise ValueError("Answer exceeds the output length limit.")
+                labels = {int(value) for value in re.findall(r"\[(\d+)\]", text)}
                 if not labels or not labels.issubset(set(range(1, len(sources) + 1))):
                     raise ValueError("Answer contains missing or invalid source citations.")
-            except (ValidationError, ValueError) as exc:
+            except ValueError as exc:
+                if on_text is not None:
+                    on_text("")
                 logger.warning("Invalid grounded response (attempt %s): %s", attempt + 1, exc)
                 if attempt:
                     raise ChatError(
@@ -253,14 +325,14 @@ class Chat:
                     {
                         "role": "user",
                         "content": (
-                            "Retry your answer as valid JSON. Cite only the supplied source "
+                            "Retry your answer as plain text. Cite only the supplied source "
                             f"numbers 1 through {len(sources)} using [number]. "
-                            "If unsupported, set supported=false."
+                            f"If unsupported, return exactly: {NO_EVIDENCE}"
                         ),
                     }
                 )
                 continue
-            return Reply(output.answer, sources, notice)
+            return Reply(text, sources, notice)
         raise ChatError("Grounded answer validation failed.")
 
     @staticmethod

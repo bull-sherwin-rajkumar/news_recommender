@@ -6,7 +6,7 @@ from typing import Literal
 
 from .config import Settings
 from .nlp import NLP, is_gallery_boilerplate, normalize
-from .storage import Article, Chunk, Filters, IndexNotReady, Store, Vectors
+from .storage import Article, ArticleSummary, Chunk, Filters, IndexNotReady, Store, Vectors
 
 STOP_WORDS = frozenset(
     "a an the and or of to in on for with about articles article news "
@@ -24,11 +24,16 @@ def required_terms(query: str) -> list[str]:
     ]
 
 
-def matches_requirements(article: Article, query: str) -> bool:
+def matches_requirements(article: Article | ArticleSummary, query: str) -> bool:
+    terms = required_terms(query)
+    if not terms:
+        return True
+    if article.index_text is None:
+        raise ValueError("Explicit query constraints require article indexing text.")
     source = " ".join(
         f"{article.headline} {article.description} {article.index_text}".casefold().split()
     )
-    return all(" ".join(term.casefold().split()) in source for term in required_terms(query))
+    return all(" ".join(term.casefold().split()) in source for term in terms)
 
 
 def lexical_expression(query: str, *, match: Literal["any", "all", "phrase"] = "any") -> str:
@@ -58,7 +63,7 @@ def lexical_expression(query: str, *, match: Literal["any", "all", "phrase"] = "
 
 @dataclass(frozen=True)
 class Hit:
-    article: Article
+    article: Article | ArticleSummary
     passages: list[Chunk]
     score: float
 
@@ -112,16 +117,25 @@ class Retriever:
         self.store.ensure_ready()
         if not queries or not any(query.strip() for query in queries):
             raise ValueError("Enter a topic or question.")
-        if (limit is not None and not 1 <= limit <= 5) or method not in ("hybrid", "bm25"):
-            raise ValueError("Use a result limit from 1 to 5 or None and method hybrid or bm25.")
+        if (limit is not None and not 1 <= limit <= self.settings.search_limit) or method not in (
+            "hybrid", "bm25"
+        ):
+            raise ValueError(
+                f"Use a result limit from 1 to {self.settings.search_limit} or None "
+                "and method hybrid or bm25."
+            )
         queries = list(dict.fromkeys(query.strip() for query in queries if query.strip()))[:2]
         filters = filters or Filters()
         fused: dict[str, float] = defaultdict(float)
         evidence: dict[str, dict[str, Chunk]] = defaultdict(dict)
         primary: dict[str, dict[int, str]] = defaultdict(dict)
         lexical_tiers: dict[str, int] = {}
-        parent_limit = self.settings.branch_limit if limit is not None else None
-        lexical_limit = self.settings.branch_limit * 10 if limit is not None else None
+        result_limit = self.settings.search_limit if limit is None else limit
+        browsing = limit is None or limit > 5
+        parent_limit = max(self.settings.branch_limit, result_limit) if browsing else (
+            self.settings.branch_limit
+        )
+        lexical_limit = parent_limit * 10
         embeddings = self.nlp.embed_queries(queries) if method == "hybrid" else []
         for index, query in enumerate(queries):
             if prefer_lexical and index == 0:
@@ -156,27 +170,34 @@ class Retriever:
                     primary[article_id].setdefault(branch_index, chunks[0].id)
                     for chunk in chunks:
                         evidence[article_id].setdefault(chunk.id, chunk)
-        articles = {aid: self.store.article(aid) for aid in fused}
+        articles = self.store.article_summaries(
+            list(fused), include_index_text=bool(required_terms(queries[0]))
+        )
         candidates = [
             aid
             for aid in sorted(fused, key=lambda aid: (lexical_tiers.get(aid, 2), -fused[aid], aid))
             if matches_requirements(articles[aid], queries[0])
         ]
-        if limit is not None:
+        if browsing:
+            candidates = candidates[:result_limit]
+        else:
             candidates = candidates[: self.settings.rerank_limit]
         if not candidates:
             return []
         if method == "bm25":
             return [
-                Hit(articles[aid], list(evidence[aid].values())[:2], fused[aid])
-                for aid in candidates[:limit]
+                Hit(articles[aid], list(evidence[aid].values())[:1], fused[aid])
+                for aid in candidates[:result_limit]
             ]
         overflow = candidates[self.settings.rerank_limit :]
         candidates = candidates[: self.settings.rerank_limit]
         passages = []
         for article_id in candidates:
-            chunk_ids = dict.fromkeys([*primary[article_id].values(), *evidence[article_id]])
-            passages.extend(evidence[article_id][chunk_id] for chunk_id in list(chunk_ids)[:2])
+            preferred_branch = 0 if article_id in lexical_tiers else 1
+            chunk_id = primary[article_id].get(
+                preferred_branch, next(iter(evidence[article_id]))
+            )
+            passages.append(evidence[article_id][chunk_id])
         pairs = [
             (
                 queries[0],
@@ -202,7 +223,7 @@ class Retriever:
             )
         hits.sort(key=lambda hit: (-hit.score, hit.article.id))
         selected: list[Hit] = []
-        while hits and (limit is None or len(selected) < limit):
+        while hits and len(selected) < result_limit:
             # Keep lexical tiers ahead of supplements, even after diversity adjustment.
             best = max(
                 hits,
@@ -215,7 +236,7 @@ class Retriever:
             selected.append(best)
             hits.remove(best)
         selected.extend(
-            Hit(articles[aid], list(evidence[aid].values())[:2], fused[aid]) for aid in overflow
+            Hit(articles[aid], list(evidence[aid].values())[:1], fused[aid]) for aid in overflow
         )
         selected.sort(key=lambda hit: lexical_tiers.get(hit.article.id, 2))
         return selected

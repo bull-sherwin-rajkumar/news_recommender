@@ -10,10 +10,11 @@ requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.0,<2",
     "datasets>=3,<5",
+    "huggingface-hub>=0.30,<2",
     "ollama>=0.6,<1",
     "pydantic>=2.10,<3",
     "python-dotenv>=1,<2",
-    "sentence-transformers>=5,<6",
+    "sentence-transformers[onnx]>=5,<6",
     "streamlit>=1.48,<2",
 ]
 

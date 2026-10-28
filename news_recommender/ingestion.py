@@ -92,7 +92,7 @@ def parse_article(row: Mapping[str, object], stats: IngestionStats) -> Article |
 def dataset_rows() -> Iterable[Mapping[str, object]]:
     from datasets import load_dataset
 
-    return load_dataset(DATASET, revision=REVISION, split="train", streaming=True)
+    return load_dataset(DATASET, revision=REVISION, split="train", streaming=False)
 
 
 def ingest(

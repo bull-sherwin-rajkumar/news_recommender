@@ -18,9 +18,16 @@ ollama pull gemma4:12b  # skip if already installed
 
 Start `ollama serve` if Ollama is not already running. The initial dataset and model
 downloads need internet access. Thereafter search and inference use local data/models.
-GPU acceleration is selected automatically when PyTorch detects a compatible GPU;
-CUDA embedding/reranking use half precision; CPU inference uses full precision.
-Set `NEWS_DEVICE=cpu` to force CPU operation. The 12B LLM is substantial: allow space
+Embeddings use CUDA and half precision by default. Install a CUDA-enabled PyTorch
+build compatible with your GPU/driver; CUDA unavailability is an explicit error.
+Set `NEWS_DEVICE=cpu` for CPU embeddings or `auto` for PyTorch device selection.
+The reranker defaults to CPU ONNX (`NEWS_RERANKER_BACKEND=onnx`), keeping GPU
+memory available for Ollama. Initial startup downloads the ONNX model into the
+Hugging Face cache; subsequent offline startup loads the cached local snapshot.
+ONNX model overrides must supply `onnx/model.onnx` and tokenizer/config files,
+or point to an equivalent local model directory. Use `NEWS_RERANKER_BACKEND=torch`
+to run other cross-encoders with PyTorch on `NEWS_DEVICE` (half precision on CUDA).
+The 12B LLM is substantial: allow space
 for its model, the PyTorch/model caches, and the corpus indexes.
 
 After the initial model downloads, you can prevent Hugging Face startup metadata
@@ -37,6 +44,10 @@ HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 streamlit run app.py
 news-ingest --limit 1000
 streamlit run app.py
 ```
+
+Ingestion downloads the pinned dataset once into the Hugging Face datasets cache,
+then iterates over local Arrow data instead of a network stream. Even `--limit`
+downloads the source dataset on the first run; subsequent runs reuse it.
 
 For the complete corpus (37,949 source rows at the pinned revision):
 
@@ -66,12 +77,16 @@ Changing the Ollama model does not require reindexing.
 - Search uses your original input without an LLM rewrite. Full-query phrase
   matches come first, followed by matches containing all meaningful search terms.
   Partial keyword and semantic matches supplement those results, not displace them.
-- Browse **all matching articles**, ten per page, using the compact row of page
-  numbers, Previous, and Next controls below the results. The total is not capped at five;
-  new searches and filter changes reset pagination. Scores are not probabilities
+- Browse **up to 300 ranked candidates**, ten per page, using the compact row of page
+  numbers, Previous, and Next controls below the results. `NEWS_SEARCH_LIMIT` can
+  change the cap (5–500). The displayed count is the retrieved candidate count,
+  not the total number of corpus matches. New searches and filter changes reset
+  pagination. Scores are not probabilities
   or a guarantee of relevance; semantic search can return loosely related articles.
 - Click **Read full article** to fetch the original complete stored body.
 - Use **Chat** for cited dataset-grounded answers and conversational follow-ups.
+  Answers stream as drafts; citations are validated at completion. Rejected drafts
+  are cleared before a retry, and failed/interrupted drafts never enter history.
 - Select **Ask about this article** to scope chat to that article. This resets the
   conversation; return to dataset-wide chat to remove the scope.
 - Chat history lasts only for the current Streamlit session. There are no accounts,
@@ -89,8 +104,9 @@ query interpretation and answer generation in Chat require Ollama.
 2. Paragraph/sentence-aware chunks contain at most 320 embedding-tokenizer tokens,
    with about 64 tokens of overlap. Token offsets refer to the **normalized indexing
    text**, not the original reader body. Long sentences are split on token boundaries.
-3. A bounded headline prefix accompanies chunks. Embedding and query/passage reranker
-   inputs are checked against actual tokenizer limits rather than silently truncated.
+3. A bounded headline prefix accompanies chunks. Embedding inputs are checked against
+   actual tokenizer limits. The reranker tokenizes each pair once in `predict` and
+   truncates to its configured 512-token maximum.
 4. SQLite FTS5 uses BM25, stronger headline/keyword weights, Unicode normalization,
    and English stemming. User text is converted to escaped terms, not raw FTS syntax.
    Search retrieves the full query as a phrase, then all meaningful terms together,
@@ -105,29 +121,63 @@ query interpretation and answer generation in Chat require Ollama.
    recommending unrelated stories that embed the same gallery. The reader still
    retains the original full article.
    Search protects phrase and all-term matches before candidate truncation, so
-   vector candidates cannot crowd them out of the reranker shortlist. These
-   Search retrieves all lexical matches without branch or result caps. Semantic
-   supplementation still uses a bounded nearest-neighbor query; it is not an
-   exhaustive set of semantic matches. Chat retains bounded retrieval budgets.
-7. `cross-encoder/ms-marco-MiniLM-L6-v2` reranks bounded evidence passages. Its raw
+   vector candidates cannot crowd them out of the reranker shortlist.
+   Both lexical and semantic retrieval are bounded: by default, Search fetches at
+   most 3,000 chunks per lexical tier and 500 nearest-neighbor chunks, then keeps
+   up to 300 article candidates. Chat retains smaller retrieval budgets.
+   Candidate metadata is fetched in one `WHERE id IN (...)` query without original
+   article bodies. Cleaned full indexing text is loaded only for explicit year or
+   quoted-phrase constraints. Reader/scoped-chat requests fetch full bodies by ID.
+7. `cross-encoder/ms-marco-MiniLM-L6-v2` reranks at most **20 articles with one
+   evidence passage each**, using CPU ONNX by default. Its raw
    scores order candidates without a hard score cutoff, in both Search and Chat.
    A small redundancy penalty encourages variety.
    In Search, scores and diversity only reorder articles within the same lexical
    tier: phrase, all terms, or supplemental. Chat keeps standard hybrid fusion
    and reranking without this lexical-first policy.
-   Search reranks the leading shortlist, then retains every remaining candidate
-   in fusion order within its lexical tier rather than discarding it. These
+   Search reranks the leading shortlist, then retains remaining candidates up to
+   the result cap in fusion order within each lexical tier. These
    remaining candidates have fusion scores, not cross-encoder scores. This keeps
-   model inference bounded without imposing a result cap.
+   model inference bounded independently of the result cap.
    Explicit years and quoted phrases must occur in the source; publication-date filtering
    remains a separate control. This avoids substituting an older election for a requested year.
-8. In Chat only, Ollama `gemma4:12b` interprets queries and conversational follow-ups,
-   then generates answers from supplied, source-labeled evidence. Search passes
+8. In Chat, first-turn questions go directly to retrieval without an LLM rewrite.
+   Follow-ups still use Ollama `gemma4:12b` to resolve conversational references.
+   Standalone literal search queries must fit the existing 96-token query budget.
+   Ollama then streams plain-text answers from supplied, source-labeled evidence;
+   JSON schema output is used only for follow-up query planning. Search passes
    the original query directly to retrieval. The LLM does not write replacement
    news or decide vector ranks.
    Unsupported topics may still retrieve loosely related vector candidates; Chat
    must refuse an answer when the supplied evidence is insufficient. Citation
    validation and model-refusal handling remain in place.
+
+Streamlit shows the page and article reader without waiting for model warmup.
+Cached background workers open the retrieval indexes, warm the embedding model
+and reranker, and run a representative Search request through keyword retrieval,
+vector retrieval, and reranking before enabling Search. This moves first-query
+index initialization into startup; warmup results are discarded, not displayed
+or saved in search history. Workers then ask Ollama to load the LLM with
+`keep_alive="30m"`. Temporary
+loading messages appear only in the selected Search or Chat view and disappear
+when ready; there is no Startup sidebar section. Search becomes
+available as soon as retrieval is ready, independently of Ollama; Chat input is
+disabled until its warmup finishes. Startup runs once per configuration/server
+process, not on page refresh. Every subsequent LLM request refreshes the retention
+period. An Ollama warmup failure is logged and shown as a warning without blocking
+Search or article reading; Chat can still retry with a normal answer request.
+After changing model/service initialization code, fully restart Streamlit to clear
+previously imported modules and cached initialization failures; refreshing the
+browser alone does not clear them.
+The default context remains **64,000 tokens**; an existing `NEWS_CONTEXT_TOKENS`
+environment value still overrides it. This is the configured maximum, not the
+actual prompt length. Check `ollama ps` and available VRAM: a 64k KV cache plus
+model weights and the embedding model may require CPU offload on a smaller GPU.
+
+SQLite connections are reused per thread. The ready-state cache checks SQLite's
+`data_version` to notice commits from other connections, so an active rebuild
+still blocks reads. Chroma's vector count is cached for search and invalidated by
+vector writes/reset. Stop the frontend before changing the embedded index, as above.
 
 The reader uses an article ID to load the full article directly, **not** concatenated
 chunks. For article chat, the complete article is supplied when it fits the conservative
@@ -142,6 +192,7 @@ Valid source labels are enforced, but that alone does not prove every answer is 
 - [ingestion](news_recommender/ingestion.py): bounded dataset ingestion and consistency checks.
 - [retrieval](news_recommender/retrieval.py): hybrid parent-level retrieval and relevance selection.
 - [chat](news_recommender/chat.py): query interpretation, contextual answers, source validation.
+- [services](news_recommender/services.py): background startup and model warmup progress.
 - [frontend](app.py): Streamlit search, reader, and conversational UI.
 
 See [.env.example](.env.example) for paths, model overrides, timeout, context budget, and
@@ -201,8 +252,10 @@ Rerunning a partially completed ingestion also counts previously indexed rows in
 `duplicates_or_existing`; that counter is not solely the number of source duplicates.
 
 The test suite covers crash recovery, source completeness, token coverage/budgets,
-ranking/filtering, gallery noise, citations, full-article reading, and the frontend
-search/reader/chat interaction. Actual local-model smoke checks also exercised
+bounded retrieval/reranking, batch metadata loading, per-thread connection reuse,
+ready-state invalidation, streaming completion/failure handling, citations,
+full-article reading, and the frontend search/reader/chat interaction.
+Actual local-model smoke checks also exercised
 grounded answers, follow-ups, and the search-to-complete-article flow.
 
 ### Historical small retrieval benchmark (before cutoff removal)

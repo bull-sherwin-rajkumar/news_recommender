@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import local
 
 from .config import Settings
 
@@ -14,7 +15,7 @@ class IndexNotReady(RuntimeError):
 
 
 @dataclass(frozen=True)
-class Article:
+class ArticleMetadata:
     id: str
     source_index: str
     url: str | None
@@ -26,9 +27,18 @@ class Article:
     category: str
     section: str
     keywords: str
+
+
+@dataclass(frozen=True)
+class Article(ArticleMetadata):
     body: str
     index_text: str
     body_hash: str
+
+
+@dataclass(frozen=True)
+class ArticleSummary(ArticleMetadata):
+    index_text: str | None
 
 
 @dataclass(frozen=True)
@@ -88,6 +98,7 @@ class Filters:
 class Store:
     def __init__(self, path: Path, *, create: bool = False):
         self.path = path
+        self._local = local()
         if create:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._initialize()
@@ -96,14 +107,21 @@ class Store:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=30)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        try:
-            with connection:
-                yield connection
-        finally:
+        connection = getattr(self._local, "connection", None)
+        if connection is None:
+            connection = sqlite3.connect(self.path, timeout=30)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            self._local.connection = connection
+        with connection:
+            yield connection
+
+    def close(self) -> None:
+        connection = getattr(self._local, "connection", None)
+        if connection is not None:
             connection.close()
+            del self._local.connection
+        self._local.ready_version = None
 
     def _initialize(self) -> None:
         with self.connect() as db:
@@ -134,12 +152,15 @@ class Store:
             """)
 
     def reset(self) -> None:
+        self._local.ready_version = None
         with self.connect() as db:
             db.execute("DELETE FROM chunk_fts")
             db.execute("DELETE FROM articles")
             db.execute("DELETE FROM manifest")
 
     def set_meta(self, key: str, value: object) -> None:
+        if key == "status":
+            self._local.ready_version = None
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO manifest VALUES (?, ?)", (key, json.dumps(value)))
 
@@ -149,11 +170,17 @@ class Store:
         return json.loads(row[0]) if row else None
 
     def ensure_ready(self) -> None:
-        if self.meta("status") != "ready":
-            raise IndexNotReady(
-                "Index is incomplete or ingestion is active. "
-                "Resume news-ingest with the same options."
-            )
+        with self.connect() as db:
+            version = db.execute("PRAGMA data_version").fetchone()[0]
+            if getattr(self._local, "ready_version", None) == version:
+                return
+            row = db.execute("SELECT value FROM manifest WHERE key='status'").fetchone()
+            if not row or json.loads(row[0]) != "ready":
+                raise IndexNotReady(
+                    "Index is incomplete or ingestion is active. "
+                    "Resume news-ingest with the same options."
+                )
+            self._local.ready_version = version
 
     def add(self, article: Article, chunks: list[Chunk]) -> bool:
         return bool(self.add_many([(article, chunks)]))
@@ -210,6 +237,24 @@ class Store:
         if row is None:
             raise LookupError(f"Article {article_id} is not available in the ready index.")
         return self._article(row)
+
+    def article_summaries(
+        self, ids: list[str], *, include_index_text: bool = False
+    ) -> dict[str, ArticleSummary]:
+        if not ids:
+            return {}
+        columns = (
+            "id, source_index, url, headline, description, author, published_at, published_day, "
+            "category, section, keywords, "
+        )
+        columns += "index_text" if include_index_text else "NULL AS index_text"
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT {columns} FROM articles WHERE indexed=1 "
+                f"AND id IN ({','.join('?' for _ in ids)})",
+                ids,
+            ).fetchall()
+        return {row["id"]: ArticleSummary(**dict(row)) for row in rows}
 
     def pending_article(self, article_id: str) -> Article:
         with self.connect() as db:
@@ -302,8 +347,10 @@ class Vectors:
             if create
             else self.client.get_collection("news_chunks", embedding_function=None)
         )
+        self._search_count: int | None = None
 
     def reset(self) -> None:
+        self._search_count = None
         self.client.delete_collection("news_chunks")
         self.collection = self.client.create_collection(
             "news_chunks", metadata={"hnsw:space": "cosine"}, embedding_function=None
@@ -315,6 +362,7 @@ class Vectors:
     def upsert(
         self, chunks: list[Chunk], embeddings: list[list[float]], articles: dict[str, Article]
     ) -> None:
+        self._search_count = None
         maximum = self.client.get_max_batch_size()
         for start in range(0, len(chunks), maximum):
             part = chunks[start : start + maximum]
@@ -333,7 +381,9 @@ class Vectors:
             )
 
     def search(self, embedding: list[float], filters: Filters, limit: int) -> list[str]:
-        count = self.count()
+        if self._search_count is None:
+            self._search_count = self.count()
+        count = self._search_count
         if not count:
             return []
         result = self.collection.query(

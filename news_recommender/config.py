@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -16,14 +17,16 @@ class Settings:
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
     ollama_model: str = "gemma4:12b"
     ollama_host: str = "http://localhost:11434"
-    device: str = "auto"
+    device: str = "cuda"
+    reranker_backend: Literal["onnx", "torch"] = "onnx"
     context_tokens: int = 64000
     ollama_timeout: float = 120
     chunk_tokens: int = 320
     overlap_tokens: int = 64
     batch_size: int = 128
     branch_limit: int = 50
-    rerank_limit: int = 40
+    rerank_limit: int = 20
+    search_limit: int = 300
 
     def __post_init__(self) -> None:
         if not 0 <= self.overlap_tokens < self.chunk_tokens <= 320:
@@ -32,21 +35,30 @@ class Settings:
             raise ValueError("Use at least 4096 context tokens and a positive Ollama timeout.")
         if min(self.batch_size, self.branch_limit, self.rerank_limit) < 1:
             raise ValueError("Batch and retrieval limits must be positive.")
+        if not 5 <= self.search_limit <= 500:
+            raise ValueError("Search limit must be between 5 and 500.")
+        if self.reranker_backend not in ("onnx", "torch"):
+            raise ValueError("Use NEWS_RERANKER_BACKEND=onnx or torch.")
 
     @classmethod
     def from_env(cls) -> "Settings":
         load_dotenv()
         os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
         os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+        backend = os.getenv("NEWS_RERANKER_BACKEND", cls.reranker_backend)
+        if backend not in ("onnx", "torch"):
+            raise ValueError("Use NEWS_RERANKER_BACKEND=onnx or torch.")
         return cls(
             data_dir=Path(os.getenv("NEWS_DATA_DIR", "data")).expanduser().resolve(),
             embedding_model=os.getenv("NEWS_EMBEDDING_MODEL", cls.embedding_model),
             reranker_model=os.getenv("NEWS_RERANKER_MODEL", cls.reranker_model),
             ollama_model=os.getenv("OLLAMA_MODEL", cls.ollama_model),
             ollama_host=os.getenv("OLLAMA_HOST", cls.ollama_host),
-            device=os.getenv("NEWS_DEVICE", "auto"),
-            context_tokens=int(os.getenv("NEWS_CONTEXT_TOKENS", "16384")),
+            device=os.getenv("NEWS_DEVICE", cls.device),
+            reranker_backend=backend,
+            context_tokens=int(os.getenv("NEWS_CONTEXT_TOKENS", str(cls.context_tokens))),
             ollama_timeout=float(os.getenv("NEWS_OLLAMA_TIMEOUT", "120")),
+            search_limit=int(os.getenv("NEWS_SEARCH_LIMIT", str(cls.search_limit))),
         )
 
     @property

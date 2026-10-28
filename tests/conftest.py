@@ -38,6 +38,9 @@ class FakeNLP:
         self.encoder = SimpleNamespace(get_sentence_embedding_dimension=lambda: 2)
         self.ranker = SimpleNamespace(tokenizer=self.tokenizer)
 
+    def warmup(self):
+        pass
+
     def document(self, headline, text, tokenizer=None):
         return headline + "\n" + text
 

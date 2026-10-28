@@ -2,7 +2,8 @@ import logging
 import re
 import unicodedata
 from functools import cached_property, lru_cache
-from typing import Protocol
+from pathlib import Path
+from typing import Literal, Protocol
 
 from .config import Settings
 from .storage import Chunk
@@ -66,8 +67,13 @@ def split_chunks(
 
 @lru_cache(maxsize=2)
 def embedding_model(name: str, device: str):
+    import torch
     from sentence_transformers import SentenceTransformer
 
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA is unavailable. Install CUDA-enabled PyTorch or set NEWS_DEVICE=cpu."
+        )
     model = SentenceTransformer(
         name, device=None if device == "auto" else device, trust_remote_code=False
     )
@@ -77,11 +83,33 @@ def embedding_model(name: str, device: str):
 
 
 @lru_cache(maxsize=2)
-def reranking_model(name: str, device: str):
+def reranking_model(name: str, device: str, backend: Literal["onnx", "torch"]):
     from sentence_transformers import CrossEncoder
 
-    model = CrossEncoder(name, device=None if device == "auto" else device, max_length=512)
-    if model.device.type == "cuda":
+    model_path = name
+    if backend == "onnx" and not Path(name).is_dir():
+        from huggingface_hub import snapshot_download
+
+        model_path = snapshot_download(
+            name,
+            allow_patterns=[
+                "*.json",
+                "*.txt",
+                "*.model",
+                "onnx/model.onnx",
+                "onnx/model.onnx_data",
+            ],
+        )
+    model = CrossEncoder(
+        model_path,
+        device="cpu" if backend == "onnx" else None if device == "auto" else device,
+        backend=backend,
+        model_kwargs={"provider": "CPUExecutionProvider", "file_name": "onnx/model.onnx"}
+        if backend == "onnx"
+        else {},
+        max_length=512,
+    )
+    if backend == "torch" and model.device.type == "cuda":
         model.model.half()
     return model
 
@@ -105,7 +133,13 @@ class NLP:
 
     @cached_property
     def ranker(self):
-        return reranking_model(self.settings.reranker_model, self.settings.device)
+        return reranking_model(
+            self.settings.reranker_model, self.settings.device, self.settings.reranker_backend
+        )
+
+    def warmup(self) -> None:
+        self.embed_queries(["news"])
+        self.rerank([("news", "A news report.")])
 
     def document(self, headline: str, chunk: str, tokenizer: Tokenizer | None = None) -> str:
         tokenizer = tokenizer or self.tokenizer
@@ -129,13 +163,6 @@ class NLP:
         return self.embed_documents([QUERY_PREFIX + query for query in queries])
 
     def rerank(self, pairs: list[tuple[str, str]]) -> list[float]:
-        tokenizer = self.ranker.tokenizer
-        for query, passage in pairs:
-            if len(tokenizer(query, text_pair=passage)["input_ids"]) > 512:
-                raise ValueError(
-                    "Query and evidence exceed the reranker budget. Shorten the query "
-                    "or rebuild with smaller chunks for this model."
-                )
         return self.ranker.predict(
             pairs, batch_size=self.settings.batch_size, show_progress_bar=False
         ).tolist()
