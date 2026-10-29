@@ -235,9 +235,11 @@ Normal tests use deterministic fixtures and doubles; they require neither downlo
 a running LLM. Model-backed evaluation should be run separately against a ready index.
 Inspect precision, ranking quality, unsupported queries, and answer citation support;
 do not infer quality from successful API calls alone.
-The evaluation CLI measures retrieval, not generated answers. Its unsupported-query
-abstention metrics measure whether retrieval returns no candidates, not whether Chat
-refuses an unsupported answer. Ungated retrieval may return candidates for such queries.
+The evaluation CLI measures retrieval, not generated answers. The included labels
+contain only supported queries: three calibration cases and ten evaluation cases.
+The CLI reports Precision@5 and nDCG@5, without unsupported-query accuracy or
+per-query abstention scores. Chat's refusal of unsupported questions must be
+evaluated separately.
 By default it evaluates standard hybrid retrieval without LLM rewriting, rather than
 the Search UI's lexical-first policy (`Retriever.search(..., prefer_lexical=True)`).
 
@@ -264,15 +266,16 @@ The figures below were recorded under the former threshold-gated hybrid policy.
 They have not been rerun for ungated retrieval and do not validate the current
 Search or Chat retrieval behavior.
 
-The included labels contain six development-sample calibration cases and 14
+The historical benchmark used six development-sample calibration cases and 14
 full-corpus evaluation cases: ten topical queries and four unsupported queries.
+Those unsupported queries are no longer included in the saved labels.
 Grades are 0 = irrelevant, 1 = partially relevant, 2 = directly relevant. Judgments
 were made from pooled result titles, descriptions, and passage evidence.
 
-| Method | Precision@5 | nDCG@5 | Unsupported queries correctly rejected |
-|---|---:|---:|---:|
-| BM25 only | 0.933 | 0.779 | 3/4 |
-| Hybrid + cross-encoder | 1.000 | 0.909 | 4/4 |
+| Method | Precision@5 | nDCG@5 |
+|---|---:|---:|
+| BM25 only | 0.933 | 0.779 |
+| Hybrid + cross-encoder | 1.000 | 0.909 |
 
 Precision@5 covers the nine topical cases with at least five labeled relevant
 articles; nDCG covers all ten topical cases. The sparse SpaceX case returned only

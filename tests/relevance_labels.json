@@ -33,21 +33,6 @@
     }
   },
   {
-    "query": "2026 US presidential election results",
-    "split": "calibration",
-    "unsupported": true
-  },
-  {
-    "query": "New Zealand election results in 2030",
-    "split": "calibration",
-    "unsupported": true
-  },
-  {
-    "query": "unicorn nuclear banana insurance",
-    "split": "calibration",
-    "unsupported": true
-  },
-  {
     "query": "United Kingdom Brexit trade negotiations",
     "relevant": {
       "71c511f9f54165452e5e3deb6ff4f105": 2,
@@ -171,28 +156,5 @@
       "9971895c7213623556dfc591c4f96108": 2,
       "8836ddee2f53011a9bf9d121723cfc4e": 2
     }
-  },
-  {
-    "query": "2099 Martian presidential election results",
-    "unsupported": true
-  },
-  {
-    "query": "telepathic pineapple levitation tutorials",
-    "unsupported": true,
-    "relevant": {
-      "62eca0f4fe533b9cc76a1d238cdd11fb": 0,
-      "03fe27d8d1f99648e43cbb45d31f195f": 0,
-      "840dabfde8865ff2569e80642bd9c2df": 0,
-      "83177df29210ae05a54bbbb73b4159bd": 0,
-      "65e709bca82e8f194c1ca62fa36e20a3": 0
-    }
-  },
-  {
-    "query": "\"flerbquux nonexisting phrase\"",
-    "unsupported": true
-  },
-  {
-    "query": "2098 Neptune parliament election results",
-    "unsupported": true
   }
 ]

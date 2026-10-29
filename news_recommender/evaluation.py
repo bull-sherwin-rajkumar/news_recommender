@@ -46,8 +46,7 @@ def main() -> None:
         description=(
             "Evaluate literal retrieval independently of LLM query rewriting. Labels JSON is "
             "a list of {query, split, relevant: {article_id: 0|1|2}, unsupported, filters}. "
-            "Use --split to select a saved label split. Unsupported-query abstention "
-            "measures empty retrieval, not Chat's evidence-based refusal."
+            "Use --split to select a saved label split. Reports Precision@5 and nDCG@5."
         )
     )
     parser.add_argument("--labels", type=Path, required=True)
@@ -68,7 +67,6 @@ def main() -> None:
             {
                 "query": case.query,
                 "unsupported": case.unsupported,
-                "correct_abstention": not hits if case.unsupported else None,
                 "has_five_labeled_relevant": sum(value > 0 for value in case.relevant.values())
                 >= 5,
                 "unjudged_returned": [value for value in ids if value not in case.relevant],
@@ -81,7 +79,6 @@ def main() -> None:
         )
     topical = [result for result in results if result["has_five_labeled_relevant"]]
     supported = [result for result in results if not result["unsupported"]]
-    unsupported = [result for result in results if result["unsupported"]]
     print(
         json.dumps(
             {
@@ -95,11 +92,6 @@ def main() -> None:
                 "mean_ndcg_at_5": (
                     sum(result["ndcg_at_5"] for result in supported) / len(supported)
                     if supported
-                    else None
-                ),
-                "unsupported_accuracy": (
-                    sum(result["correct_abstention"] for result in unsupported) / len(unsupported)
-                    if unsupported
                     else None
                 ),
                 "unjudged_note": (

@@ -28,29 +28,31 @@ def test_label_validation():
 def test_saved_labels_have_separate_valid_splits():
     path = Path(__file__).with_name("relevance_labels.json")
     cases = [Case.model_validate(item) for item in json.loads(path.read_text())]
-    assert len(cases) == 20
+    assert len(cases) == 13
+    assert all(not case.unsupported for case in cases)
     calibration = {case.query for case in cases if case.split == "calibration"}
     evaluation = {case.query for case in cases if case.split == "evaluation"}
-    assert len(calibration) == 6 and len(evaluation) == 14
+    assert len(calibration) == 3 and len(evaluation) == 10
     assert calibration.isdisjoint(evaluation)
     assert all(len(article_id) == 32 for case in cases for article_id in case.relevant)
 
 
-def test_report_preserves_scores_without_threshold(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("include_unsupported", [False, True])
+def test_report_preserves_scores_without_threshold(
+    tmp_path, monkeypatch, capsys, include_unsupported
+):
     labels = tmp_path / "labels.json"
     relevant = {f"candidate-{index}": 2 for index in range(5)}
-    labels.write_text(
-        json.dumps(
-            [
-                {"query": "fixture query", "relevant": relevant},
-                {
-                    "query": "fixture query",
-                    "unsupported": True,
-                    "filters": {"section": "empty"},
-                },
-            ]
+    cases = [{"query": "fixture query", "relevant": relevant}]
+    if include_unsupported:
+        cases.append(
+            {
+                "query": "fixture query",
+                "unsupported": True,
+                "filters": {"section": "empty"},
+            }
         )
-    )
+    labels.write_text(json.dumps(cases))
     hits = [
         SimpleNamespace(
             article=SimpleNamespace(id=article_id, headline=f"Fixture {index}"),
@@ -72,9 +74,10 @@ def test_report_preserves_scores_without_threshold(tmp_path, monkeypatch, capsys
     assert report["method"] == "hybrid"
     assert report["split"] == "evaluation"
     assert report["mean_precision_at_5"] == report["mean_ndcg_at_5"] == 1.0
-    assert report["unsupported_accuracy"] == 1.0
+    assert "unsupported_accuracy" not in report
+    assert all("correct_abstention" not in result for result in report["results"])
     assert [hit["score"] for hit in report["results"][0]["hits"]] == [hit.score for hit in hits]
-    assert report["results"][1]["correct_abstention"] is True
+    assert len(report["results"]) == (2 if include_unsupported else 1)
 
 
 def test_removed_threshold_option_is_rejected(tmp_path, monkeypatch, capsys):
