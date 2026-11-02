@@ -30,6 +30,20 @@ to run other cross-encoders with PyTorch on `NEWS_DEVICE` (half precision on CUD
 The 12B LLM is substantial: allow space
 for its model, the PyTorch/model caches, and the corpus indexes.
 
+On Ubuntu 24.04 EC2, run `bash setup.sh` from the cloned repository as a
+non-root user with passwordless sudo. It prompts only for the Ollama model,
+installs dependencies and Ollama, warms the configured embedding/reranking
+models, indexes the full corpus, and starts the `news-explorer` systemd service.
+Existing `.env` model settings are preserved; a newly copied `.env` uses
+`NEWS_DEVICE=auto`. GPU acceleration requires working drivers.
+If the configured 64,000-token Ollama warmup fails, setup retries with
+8,192 tokens and saves `NEWS_CONTEXT_TOKENS=8192` in `.env` only after a successful
+retry. Other configured context lengths are left unchanged. If both attempts
+fail, setup stops with an error. This fallback applies during setup, not normal
+application startup. Allow inbound TCP 8501 only from trusted IPs in the EC2
+security group; Ollama stays on localhost. View logs with
+`sudo journalctl -u news-explorer -f`.
+
 After the initial model downloads, you can prevent Hugging Face startup metadata
 checks as well:
 
