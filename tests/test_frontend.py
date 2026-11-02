@@ -6,12 +6,20 @@ from streamlit.testing.v1 import AppTest
 
 from news_recommender.chat import Chat, Reply
 from news_recommender.ingestion import ingest
-from news_recommender.nlp import NLP
+from news_recommender.nlp import NLP, format_article_body
 from news_recommender.retrieval import Retriever
 from news_recommender.services import Services
 from news_recommender.storage import Filters, Store, Vectors
 
 from .conftest import source_row
+
+
+def test_article_body_formatting_cleans_spacing_without_changing_case():
+    body = "  (CNN)Right now, tuSimple.Founded   in 2015.\n\n\nThe iPhone was mentioned.  "
+
+    assert format_article_body(body) == (
+        "(CNN) Right now, tuSimple. Founded in 2015.\n\nThe iPhone was mentioned."
+    )
 
 
 @pytest.fixture(autouse=True)

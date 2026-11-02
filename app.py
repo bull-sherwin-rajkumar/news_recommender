@@ -7,6 +7,7 @@ from chromadb.errors import ChromaError
 
 from news_recommender.chat import Chat
 from news_recommender.config import Settings
+from news_recommender.nlp import format_article_body
 from news_recommender.retrieval import Hit, Retriever
 from news_recommender.services import ServiceName, Services
 from news_recommender.storage import Filters, IndexNotReady, Store
@@ -193,7 +194,7 @@ def search_view(retriever: Retriever | None, filters: Filters, store: Store) -> 
             "Back to results",
             on_click=lambda: st.session_state.pop("selected_article", None),
         )
-        st.text(article.body)
+        st.text(format_article_body(article.body))
     else:
         page_count = max(1, (len(hits) + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
         page = min(max(1, st.session_state.get("search_page", 1)), page_count)

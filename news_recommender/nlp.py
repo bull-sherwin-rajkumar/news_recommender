@@ -24,6 +24,12 @@ def normalize(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def format_article_body(text: str) -> str:
+    text = normalize(text)
+    text = re.sub(r"(?<=[a-z0-9])([.!?])(?=[A-Z])", r"\1 ", text)
+    return re.sub(r"(?<=[)\]])(?=[A-Z])", " ", text)
+
+
 def is_gallery_boilerplate(text: str) -> bool:
     return text.count("Hide Caption") >= 2 or text.count("Photos:") >= 2
 
