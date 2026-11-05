@@ -243,19 +243,42 @@ PYTHON_DOTENV_DISABLED=1 NEWS_DATA_DIR=./data \
   news-evaluate --labels tests/relevance_labels.json --split calibration
 PYTHON_DOTENV_DISABLED=1 NEWS_DATA_DIR=./data-full \
   news-evaluate --labels tests/relevance_labels.json --split evaluation
+PYTHON_DOTENV_DISABLED=1 NEWS_DATA_DIR=./data-full \
+  news-evaluate --labels tests/relevance_labels.json --split evaluation --stage all
 ```
 
 Normal tests use deterministic fixtures and doubles; they require neither downloads nor
 a running LLM. Model-backed evaluation should be run separately against a ready index.
 Inspect precision, ranking quality, unsupported queries, and answer citation support;
 do not infer quality from successful API calls alone.
-The evaluation CLI measures retrieval, not generated answers. The included labels
-contain only supported queries: three calibration cases and ten evaluation cases.
-The CLI reports Precision@5 and nDCG@5, without unsupported-query accuracy or
-per-query abstention scores. Chat's refusal of unsupported questions must be
-evaluated separately.
-By default it evaluates standard hybrid retrieval without LLM rewriting, rather than
-the Search UI's lexical-first policy (`Retriever.search(..., prefer_lexical=True)`).
+Evaluation follows four stages:
+
+1. **Prepare the test set.** Each label has a query, relevance-graded article IDs,
+   optional filters, and an optional `query_type` (`keyword`, `natural_language`, or
+   `conversational`). Add `expected_facts` and `follow_ups` (each with a query and
+   expected facts) to support chat-answer and multi-turn review. The report shows
+   annotation coverage and marks unclassified queries rather than guessing their type.
+2. **Evaluate retrieval.** The default `--stage retrieval` preserves the lightweight
+   retrieval-only workflow and reports Precision@5 and nDCG@5. It evaluates standard
+   hybrid retrieval without LLM rewriting, rather than the Search UI's lexical-first
+   policy (`Retriever.search(..., prefer_lexical=True)`).
+3. **Evaluate chat answers.** Use `--stage chat` or `--stage all` to run answers and
+   annotated follow-ups. The report includes answers, expected facts, source articles,
+   and empty manual-review fields for correctness, completeness, groundedness,
+   citations, and follow-ups. Fill these review fields after comparing the answer
+   against expected facts and its cited sources; valid citation syntax alone does
+   not establish answer quality. Chat evaluation requires a ready index and Ollama.
+4. **Measure latency.** `--stage latency` or `--stage all` warms the models and
+   reports initialization, search, end-to-end chat-turn, and LLM-generation timings.
+   The all-stage run includes the model-backed startup cost and can take substantially
+   longer than retrieval-only evaluation.
+
+The included labels contain only supported queries: three calibration cases and ten
+evaluation cases. They currently include article relevance judgments but not expected
+answer facts or follow-ups, so chat answer quality is intentionally left for manual
+annotation and review. Precision@5 is averaged over queries with at least five labeled
+relevant articles; nDCG@5 includes all supported cases. Unsupported-query accuracy is
+not inferred from these supported-only labels.
 
 ### Verified corpus
 

@@ -73,6 +73,8 @@ def test_grounded_answer_and_citation_retry(settings, indexed):
     reply = make_chat(settings, indexed, client).answer("What happened during the flood?")
     assert reply.text.endswith("[1].")
     assert reply.sources
+    assert reply.generation_seconds is not None
+    assert reply.generation_seconds >= 0
     assert len(client.calls) == 2
     assert all(call["stream"] is True and "format" not in call for call in client.calls)
     assert all(call["keep_alive"] == "30m" for call in client.calls)

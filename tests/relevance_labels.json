@@ -1,6 +1,7 @@
 [
   {
     "query": "Beijing Winter Olympics",
+    "query_type": "keyword",
     "split": "calibration",
     "relevant": {
       "72052580e83c3fcd0e166eede90a35fc": 2,
@@ -12,6 +13,7 @@
   },
   {
     "query": "Afghan women Taliban",
+    "query_type": "keyword",
     "split": "calibration",
     "relevant": {
       "661bbfc3c4ebd5dcdf5be5acb219fe16": 2,
@@ -23,6 +25,7 @@
   },
   {
     "query": "International Women's Day",
+    "query_type": "keyword",
     "split": "calibration",
     "relevant": {
       "335b2d5c6d05346aa745f82fca2b66d6": 2,
@@ -34,6 +37,7 @@
   },
   {
     "query": "United Kingdom Brexit trade negotiations",
+    "query_type": "keyword",
     "relevant": {
       "71c511f9f54165452e5e3deb6ff4f105": 2,
       "e75f01aa9acca8d892238fb47becc875": 2,
@@ -49,6 +53,7 @@
   },
   {
     "query": "wildfires and climate change in Australia",
+    "query_type": "keyword",
     "relevant": {
       "0990390820e32e2d6fe59e4d47871ab0": 2,
       "72648239a2ab7ee15dbdacdaa509db95": 1,
@@ -62,6 +67,7 @@
   },
   {
     "query": "COVID-19 vaccine safety",
+    "query_type": "keyword",
     "relevant": {
       "0afffd1832ae4c98f3ffa8f93dff5d83": 2,
       "16246c7ab30094fd9698146aadaa2e2c": 2,
@@ -75,6 +81,7 @@
   },
   {
     "query": "NASA Mars rover Perseverance",
+    "query_type": "keyword",
     "relevant": {
       "8abc50f3f7b6846ec985d04c064c89a2": 2,
       "d96ff24fbf62d0fc58a1ce99ee6c7461": 1,
@@ -86,6 +93,7 @@
   },
   {
     "query": "Russia invasion Ukraine refugees",
+    "query_type": "keyword",
     "relevant": {
       "0448c99a059a7735369cd4cea5bcf67d": 2,
       "56b1e794fe21799cb0ada28cc2a41736": 2,
@@ -98,6 +106,7 @@
   },
   {
     "query": "North Korea ballistic missile tests",
+    "query_type": "keyword",
     "relevant": {
       "4487a79001fc6eff4f5f20930e909644": 2,
       "7f2cf3ed8e01a3a8ecff1bfda9cc0e00": 2,
@@ -111,6 +120,7 @@
   },
   {
     "query": "How are rising sea levels threatening coastal communities?",
+    "query_type": "natural_language",
     "relevant": {
       "4670bfaad1936583f15f76ba913f2571": 2,
       "ff2557edb09de89bc4feffefc81af8ec": 2,
@@ -124,6 +134,7 @@
   },
   {
     "query": "SpaceX reusable rockets landing",
+    "query_type": "keyword",
     "relevant": {
       "60426a3b2364428f1c9212bc0d80cac7": 1,
       "64e8a51cb77550922e3115e8b07ee099": 2,
@@ -134,6 +145,7 @@
   },
   {
     "query": "inflation and interest rates Federal Reserve",
+    "query_type": "keyword",
     "relevant": {
       "d2fdd4583f5f6373be054d404cdadb3d": 2,
       "9cca2bda4a190ed79f219283a5983fef": 2,
@@ -147,6 +159,7 @@
   },
   {
     "query": "football Lionel Messi Paris Saint Germain",
+    "query_type": "keyword",
     "relevant": {
       "92ec5698092ad66271bbef7034d0a30c": 2,
       "555d5934fee7ee76e19787dcf926dc49": 2,

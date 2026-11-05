@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from news_recommender import evaluation
+from news_recommender.chat import Reply
 from news_recommender.evaluation import Case, metrics
 
 
@@ -35,6 +36,8 @@ def test_saved_labels_have_separate_valid_splits():
     assert len(calibration) == 3 and len(evaluation) == 10
     assert calibration.isdisjoint(evaluation)
     assert all(len(article_id) == 32 for case in cases for article_id in case.relevant)
+    assert sum(case.query_type == "keyword" for case in cases) == 12
+    assert sum(case.query_type == "natural_language" for case in cases) == 1
 
 
 @pytest.mark.parametrize("include_unsupported", [False, True])
@@ -78,6 +81,91 @@ def test_report_preserves_scores_without_threshold(
     assert all("correct_abstention" not in result for result in report["results"])
     assert [hit["score"] for hit in report["results"][0]["hits"]] == [hit.score for hit in hits]
     assert len(report["results"]) == (2 if include_unsupported else 1)
+
+
+def test_all_stages_report_chat_review_followups_and_latencies(tmp_path, monkeypatch, capsys):
+    labels = tmp_path / "labels.json"
+    relevant = {f"candidate-{index}": 2 for index in range(5)}
+    labels.write_text(
+        json.dumps(
+            [
+                {
+                    "query": "fixture query",
+                    "query_type": "keyword",
+                    "relevant": relevant,
+                    "expected_facts": ["The event happened in 2024."],
+                    "follow_ups": [
+                        {
+                            "query": "What happened next?",
+                            "expected_facts": ["The response began the following day."],
+                        }
+                    ],
+                }
+            ]
+        )
+    )
+    hits = [
+        SimpleNamespace(
+            article=SimpleNamespace(id=article_id, headline=f"Fixture {index}"),
+            score=1.0,
+        )
+        for index, article_id in enumerate(relevant)
+    ]
+    search_calls = []
+
+    def search(queries, filters, *, method):
+        search_calls.append(queries)
+        return hits
+
+    retriever = SimpleNamespace(
+        nlp=SimpleNamespace(warmup=lambda: None),
+        search=search,
+    )
+    answer_calls = []
+
+    class FakeChat:
+        def __init__(self, settings, actual_retriever):
+            assert actual_retriever is retriever
+
+        warmup_warning = None
+
+        def warmup(self):
+            pass
+
+        def answer(self, query, history, filters):
+            answer_calls.append((query, list(history)))
+            return Reply("Fixture answer [1].", hits[:1], generation_seconds=0.25)
+
+    monkeypatch.setattr(evaluation.Settings, "from_env", lambda: object())
+    monkeypatch.setattr(evaluation, "Retriever", lambda settings: retriever)
+    monkeypatch.setattr(evaluation, "Chat", FakeChat)
+    chat = FakeChat(None, retriever)
+    monkeypatch.setattr(
+        evaluation,
+        "Services",
+        lambda settings: SimpleNamespace(
+            retrieval=SimpleNamespace(result=lambda: retriever),
+            chat=SimpleNamespace(result=lambda: chat),
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["news-evaluate", "--labels", str(labels), "--stage", "all"],
+    )
+    evaluation.main()
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["stages"]["test_set_preparation"]["query_mix"] == {"keyword": 1}
+    assert report["stages"]["retrieval"]["mean_precision_at_5"] == 1.0
+    assert report["stages"]["chat_answers"]["human_review_required"] is True
+    assert report["results"][0]["chat"]["turns"][0]["expected_facts"] == [
+        "The event happened in 2024."
+    ]
+    assert report["results"][0]["chat"]["turns"][0]["manual_review"]["correctness"] is None
+    assert report["stages"]["latencies"]["mean_llm_generation_seconds"] == 0.25
+    assert search_calls == [["fixture query"]]
+    assert answer_calls[1][0] == "What happened next?"
+    assert [message["role"] for message in answer_calls[1][1]] == ["user", "assistant"]
 
 
 def test_removed_threshold_option_is_rejected(tmp_path, monkeypatch, capsys):

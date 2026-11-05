@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -55,6 +56,7 @@ class Reply:
     text: str
     sources: list[Hit]
     notice: str | None = None
+    generation_seconds: float | None = None
 
 
 class Chat:
@@ -301,12 +303,15 @@ class Chat:
             *history_messages,
             {"role": "user", "content": question_prefix + "\n\n".join(blocks)},
         ]
+        generation_seconds = 0.0
         for attempt in range(2):
             if on_text is not None:
                 on_text("")
+            generation_started = time.perf_counter()
             text = self._stream_answer(messages, on_text)
+            generation_seconds += time.perf_counter() - generation_started
             if text == NO_EVIDENCE:
-                return Reply(NO_EVIDENCE, [], notice)
+                return Reply(NO_EVIDENCE, [], notice, generation_seconds)
             try:
                 if len(text) > 16000:
                     raise ValueError("Answer exceeds the output length limit.")
@@ -332,7 +337,7 @@ class Chat:
                     }
                 )
                 continue
-            return Reply(text, sources, notice)
+            return Reply(text, sources, notice, generation_seconds)
         raise ChatError("Grounded answer validation failed.")
 
     @staticmethod
